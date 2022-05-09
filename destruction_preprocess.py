@@ -22,7 +22,7 @@ from destruction_utilities import *
 
 #%% FUNCTIONS
     
-def tiled_profile(source:str, tile_size:tuple=(128, 128, 1)):
+def tiled_profile(source:str, tile_size:tuple=(128, 128, 1)) -> dict:
     '''Computes raster profile for tiles'''
     raster  = rasterio.open(source)
     profile = raster.profile
@@ -33,12 +33,13 @@ def tiled_profile(source:str, tile_size:tuple=(128, 128, 1)):
     profile.update(width=profile['width'] // tile_size[0], height=profile['height'] // tile_size[0], count=tile_size[2], transform=affine)
     return profile
 
-def rasterise(source:str, profile:tuple, attribute:str=None, dtype:str='uint8'):
+def rasterise(source, profile:tuple, attribute:str=None, dtype:str='uint8') -> np.ndarray:
     '''Tranforms vector data into raster'''
-    vector     = geopandas.read_file(source)
-    geometries = vector['geometry']
+    if isinstance(source, str): 
+        source = geopandas.read_file(source)
+    geometries = source['geometry']
     if attribute is not None:
-        geometries = zip(geometries, vector[attribute])
+        geometries = zip(geometries, source[attribute])
     image  = features.rasterize(geometries, out_shape=(profile['height'], profile['width']), transform=profile['transform'])
     image  = image.astype(dtype)
     return image
@@ -95,9 +96,9 @@ del values, dates
 dates = damage.columns[:-1]
 for date in dates:
     print(date)
-    subset = damage[[date, 'geometry']].sort_values(by=date)
-    subset = zip(subset['geometry'], subset[date])
-    subset = features.rasterize(subset, out_shape=(profile['height'], profile['width']), transform=profile['transform'])
+    subset = damage[[date, 'geometry']].sort_values(by=date) # Sorting takes the max per pixel
+    subset = rasterise(subset, profile, date)
     subset = np.where(analysis, subset, -1)
     write_raster(subset, profile, f'../data/aleppo/labels/label_{date}.tif', nodata=-1, dtype='int8')
 del dates, date, subset
+# %%
