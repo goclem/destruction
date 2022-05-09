@@ -10,7 +10,6 @@
 # Modules
 from tensorflow.keras import layers, models
 
-# Convolution block
 def convolution_block(inputs, filters:int, dropout:float, name:str):
     convolution   = layers.Conv2D(filters=filters, kernel_size=(3, 3), activation='relu', padding='same', use_bias=False, kernel_initializer='he_normal', name=f'{name}_convolution')(inputs)
     pooling       = layers.MaxPool2D(pool_size=(2, 2), name=f'{name}_pooling')(convolution)
@@ -18,14 +17,12 @@ def convolution_block(inputs, filters:int, dropout:float, name:str):
     outputs       = layers.SpatialDropout2D(rate=dropout, name=f'{name}_dropout')(normalisation)
     return outputs
 
-# Dense block
 def dense_block(inputs, units:int=1, dropout:float=0, name:str=''):
     dense         = layers.Dense(units=units, activation='relu', use_bias=False, kernel_initializer='he_normal', name=f'{name}_dense')(inputs)
     normalisation = layers.BatchNormalization(name=f'{name}_normalisation')(dense)
     outputs       = layers.Dropout(rate=dropout, name=f'{name}_dropout')(normalisation)
     return outputs
 
-# Convolutional network
 def convolutional_network(shape:tuple, filters:int, units:int, dropout:float):
     # Input layer
     inputs = layers.Input(shape=shape, name='inputs')
@@ -45,7 +42,6 @@ def convolutional_network(shape:tuple, filters:int, units:int, dropout:float):
     model   = models.Model(inputs=inputs, outputs=outputs, name='convolutional_network')
     return model
 
-# Encoder block with shared parameters
 def encoder_block_shared(shape:tuple, filters:int=1, dropout=0):
     inputs  = layers.Input(shape=shape, name='inputs')
     tensor  = convolution_block(inputs, filters=filters*1, dropout=dropout, name='block1')
@@ -57,7 +53,6 @@ def encoder_block_shared(shape:tuple, filters:int=1, dropout=0):
     encoder = models.Model(inputs=inputs, outputs=outputs, name='encoder')
     return encoder
 
-# Siamese convolutional network
 def siamese_convolutional_network(shape:tuple, args_encode:dict, args_dense:dict):
     # Input layers
     images1 = layers.Input(shape=shape, name='images1')
