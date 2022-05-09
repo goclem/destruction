@@ -68,3 +68,15 @@ label1 = labels[400:]
 index = np.where(label0 != label1)[0]
 for i in np.random.choice(index, 5): 
     compare([image0[i], image1[i], damages[i]], [label0[i], label1[i], 'damage'])
+
+#%% CROPPED PROFILE
+
+def crop_profile(source, size=(1280, 1280)):
+    source  = '../data/aleppo/images/image_2017-08-14.tif'
+    profile = rasterio.open(source).profile
+    centre  = (profile['width'] // 2, profile['height'] // 2)
+    window  = windows.Window.from_slices(
+        (centre[0] - size[0], centre[0] + size[0]),
+        (centre[1] - size[1], centre[1] + size[1])
+    )
+    return window
