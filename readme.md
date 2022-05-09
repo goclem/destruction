@@ -1,18 +1,22 @@
-# Monitoring war destruction from space
+# Monitoring war destruction from space using machine learning (continued)
+
+- Authors: Hannes Mueller, Andre Groeger, Clement Gorin
+- Updated: 2022.05.09
+
+Follow-up project using Mueller et al. Monitoring war destruction from space using machine learning. Proceedings of the National Academy of Sciences, 118(23), 2021.
 
 ## Scripts
 
 ```
-./damage_tensorflow
-	/damage.code-workspace
-	/damage_utilities.py
-	/damage_preprocess.py
-	/damage_models.py
-	/damage_optimise.py
-	/damage_predict.py
-	/damage_postprocess.py
-	/damage_statistics.py
-	/damage_environment.yml
+./destruction
+	/destruction_utilities.py
+	/destruction_preprocess.py
+	/destruction_models.py
+	/destruction_optimise.py
+	/destruction_predict.py
+	/destruction_postprocess.py
+	/destruction_statistics.py
+	/destruction_environment.yml
 ```
 
 ## Data
@@ -29,10 +33,10 @@
 		/predicts
 			/predict_2011_01_01.tif
 			/...
-		/vectors
+		/others
 			/aleppo_damage.gpkg
 			/aleppo_noanalysis.gpkg
 			/aleppo_settlement.gpkg
-			/aleppo_observations.tif
+			/aleppo_samples.tif
 	/...
 ```
