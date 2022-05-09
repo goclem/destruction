@@ -64,7 +64,7 @@ index   = dict(training=0.70, validation=0.15, test=0.15)
 index   = np.random.choice(np.arange(len(index)) + 1, np.sum(analysis), p=list(index.values()))
 samples = analysis.astype(int)
 np.place(samples, analysis, index)
-write_raster(samples, profile, '../data/aleppo/vectors/aleppo_samples.tif', nodata=0)
+write_raster(samples, profile, '../data/aleppo/vectors/aleppo_samples.tif', nodata=-1, dtype='int8')
 del index, samples
 
 #%% COMPUTES LABELS
