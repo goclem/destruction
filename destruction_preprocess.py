@@ -52,9 +52,9 @@ settlement = search_data('aleppo_settlement.*gpkg$')
 noanalysis = search_data('aleppo_noanalysis.*gpkg$')
 
 # Computes analysis zone
-profile    = tiled_profile(source=image, tile_size=(128, 128, 1))
-settlement = rasterise(source=settlement, profile=profile, dtype='bool')
-noanalysis = rasterise(source=noanalysis, profile=profile, dtype='bool')
+profile    = tiled_profile(image, tile_size=(128, 128, 1))
+settlement = rasterise(settlement, profile, dtype='bool')
+noanalysis = rasterise(noanalysis, profile, dtype='bool')
 analysis   = np.logical_and(settlement, np.invert(noanalysis))
 del image, settlement, noanalysis
 
@@ -64,11 +64,8 @@ index   = dict(training=0.70, validation=0.15, test=0.15)
 index   = np.random.choice(np.arange(len(index)) + 1, np.sum(analysis), p=list(index.values()))
 samples = analysis.astype(int)
 np.place(samples, analysis, index)
-del index
-
-# Saves sample raster
 write_raster(samples, profile, '../data/aleppo/vectors/aleppo_samples.tif', nodata=0)
-del samples
+del index, samples
 
 #%% COMPUTES LABELS
 
