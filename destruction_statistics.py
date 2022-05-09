@@ -4,7 +4,7 @@
 @description: Computes prediction statistics
 @author: Clement Gorin
 @contact: gorinclem@gmail.com
-@version: 2022.05.04
+@version: 2022.05.09
 '''
 
 #%% HEADER

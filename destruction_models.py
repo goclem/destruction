@@ -4,7 +4,7 @@
 @description: Initlaises model structures
 @author: Clement Gorin
 @contact: gorinclem@gmail.com
-@version: 2022.05.04
+@version: 2022.05.09
 '''
 
 # Modules

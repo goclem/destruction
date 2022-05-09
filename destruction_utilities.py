@@ -4,7 +4,7 @@
 @description: Utilities
 @author: Clement Gorin
 @contact: gorinclem@gmail.com
-@version: 2022.05.04
+@version: 2022.05.00
 '''
 
 #%% HEADER

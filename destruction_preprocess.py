@@ -4,7 +4,7 @@
 @description: Optimises models
 @author: Clement Gorin
 @contact: gorinclem@gmail.com
-@version: 2022.05.08
+@version: 2022.05.09
 '''
 
 #%% HEADER
