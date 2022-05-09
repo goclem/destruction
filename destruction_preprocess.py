@@ -33,17 +33,6 @@ def tiled_profile(source:str, tile_size:tuple=(128, 128, 1)) -> dict:
     profile.update(width=profile['width'] // tile_size[0], height=profile['height'] // tile_size[0], count=tile_size[2], transform=affine)
     return profile
 
-def rasterise(source, profile:tuple, attribute:str=None, dtype:str='uint8') -> np.ndarray:
-    '''Tranforms vector data into raster'''
-    if isinstance(source, str): 
-        source = geopandas.read_file(source)
-    geometries = source['geometry']
-    if attribute is not None:
-        geometries = zip(geometries, source[attribute])
-    image  = features.rasterize(geometries, out_shape=(profile['height'], profile['width']), transform=profile['transform'])
-    image  = image.astype(dtype)
-    return image
-
 #%% COMPUTES TILE SAMPLES
 
 # Files

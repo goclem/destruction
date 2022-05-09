@@ -10,6 +10,7 @@
 #%% HEADER
 
 # Modules
+import geopandas
 import numpy as np
 import pandas as pd
 import os
@@ -18,6 +19,7 @@ import re
 
 from typing import Union
 from matplotlib import pyplot
+from rasterio import features
 from tensorflow.keras import utils
 
 #%% FILE UTILITIES
@@ -39,15 +41,15 @@ def pattern(city:str='.*', type:str='.*', date:str='.*', ext:str='tif'):
 
 #%% RASTER UTILITIES
 
-def read_raster(source:str, band:int=None, dtype:str='uint8') -> np.ndarray:
+def read_raster(source:str, band:int=None, window=None, dtype:str='uint8') -> np.ndarray:
     '''Reads a raster as a numpy array'''
     raster = rasterio.open(source)
     if band is not None:
-        image = raster.read(band)
+        image = raster.read(band, window=window)
         image = np.expand_dims(image, 0)
     else: 
-        image = raster.read()
-    image  = image.transpose([1, 2, 0]).astype(dtype)
+        image = raster.read(window=window)
+    image = image.transpose([1, 2, 0]).astype(dtype)
     return image
 
 def write_raster(array:np.ndarray, profile:Union[str, dict], destination:str, nodata:int=None, dtype:str='uint8') -> None:
@@ -63,9 +65,22 @@ def write_raster(array:np.ndarray, profile:Union[str, dict], destination:str, no
         raster.write(array)
         raster.close()
 
+def rasterise(source, profile:tuple, attribute:str=None, dtype:str='uint8') -> np.ndarray:
+    '''Tranforms vector data into raster'''
+    if isinstance(source, str): 
+        source = geopandas.read_file(source)
+    if isinstance(profile, str): 
+        profile = rasterio.open(profile).profile
+    geometries = source['geometry']
+    if attribute is not None:
+        geometries = zip(geometries, source[attribute])
+    image  = features.rasterize(geometries, out_shape=(profile['height'], profile['width']), transform=profile['transform'])
+    image  = image.astype(dtype)
+    return image
+
 #%% ARRAY UTILITIES
 
-def images_to_tiles(images:np.ndarray, tile_size:tuple=(64, 64)) -> np.ndarray:
+def images_to_tiles(images:np.ndarray, tile_size:tuple=(128, 128)) -> np.ndarray:
     '''Converts images to tiles of a given size'''
     n_images, image_width, image_height, n_bands = images.shape
     tile_width, tile_height = tile_size

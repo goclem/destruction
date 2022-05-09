@@ -31,23 +31,40 @@ sequence = np.tile(sequence, 9).reshape(3, 3, len(sequence))
 # Sequences
 sequence = sequence.reshape(3 * 3, 6)
 sequence = np.apply_along_axis(generate_sequences, 1, sequence)
-# %%
 
-import re
-from destruction_utilities import search_files
+# %% READS SLICES OF RASTER
 
+from rasterio import windows
+from destruction_utilities import *
+from numpy import random
+from skimage import measure
 
-def make_pattern(city:str='.*', type:str='.*', date:str='.*', ext:str='tif'):
-    pattern = f'^.*{city}/.*/{type}_{date}\.{ext}$'
-    return pattern
+windows = dict(
+    aleppo_label = windows.Window.from_slices((88, 108), (136, 156)),
+    aleppo_image = windows.Window.from_slices((11264, 13824), (17408, 19968))
+)
 
-search_files('../data', pattern=pattern)
+damages = search_data('damage.gpkg$')
+profile = search_data(pattern('aleppo', 'image'))[0]
+damages = rasterise(damages, profile, '2016-09-18')[11264:13824, 17408:19968]
+damages = np.expand_dims(np.equal(damages, 3), (0, 3))
+damages = np.squeeze(images_to_tiles(damages, tile_size=(128, 128)))
+damages = np.array([measure.block_reduce(damage, (4,4), np.max) for damage in damages])
 
-def search_files(directory:str, pattern:dict='.') -> list:
-    files = list()
-    for root, _, file_names in os.walk(directory):
-        for file_name in file_names:
-            files.append(os.path.join(root, file_name))
-    files = list(filter(re.compile(pattern).search, files))
-    files.sort()
-    return files
+images = search_data(pattern('aleppo', 'image'))
+images = np.array([read_raster(image, window=windows['aleppo_image']) for image in [images[5], images[25]]])
+images = images_to_tiles(images, tile_size=(128, 128))
+image0 = images[:400]
+image1 = images[400:]
+
+labels = search_data(pattern('aleppo', 'label'))
+labels = np.array([read_raster(label, window=windows['aleppo_label']) for label in [labels[5], labels[25]]])
+labels = np.equal(labels, 3)
+labels = images_to_tiles(labels, tile_size=(1, 1))
+labels = np.squeeze(labels)
+label0 = labels[:400]
+label1 = labels[400:]
+
+index = np.where(label0 != label1)[0]
+for i in np.random.choice(index, 5): 
+    compare([image0[i], image1[i], damages[i]], [label0[i], label1[i], 'damage'])
