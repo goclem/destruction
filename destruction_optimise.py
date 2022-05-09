@@ -10,32 +10,51 @@
 #%% HEADER
 
 # Modules
-from timeit import repeat
 import numpy as np
 import pandas as pd
 import itertools
+import destruction_models as models
 
-from destruction_models import *
 from destruction_utilities import *
+from numpy import random
+from matplotlib import pyplot
 from tensorflow.keras import callbacks, preprocessing
 from os import path
 
-# Paths
-paths = dict(aleppo='../data/aleppo')
-
 #%% FUNCTIONS
+
+# Splits the data multiple samples
+def sample_split(images:np.ndarray, sizes:dict, seed:int=1) -> list:
+    random.seed(seed)
+    samples = list(sizes.keys())
+    indexes = random.choice(samples, images.shape[0], p=list(sizes.values()))
+    samples = [images[indexes == sample, ...] for sample in samples]
+    return samples
+
+# Displays model training history
+def display_history(history:dict, stats:list=['accuracy', 'loss']) -> None:
+    fig, axs = pyplot.subplots(nrows=1, ncols=2, figsize=(10, 5))
+    for ax, stat in zip(axs.ravel(), stats):
+        ax.plot(history[stat])
+        ax.plot(history[f'val_{stat}'])
+        ax.set_title(f'Training {stat}', fontsize=15)
+        ax.set_ylabel('Accuracy')
+        ax.set_xlabel('Epoch')
+        ax.legend(['Training sample', 'Validation sample'], frameon=False)
+    pyplot.tight_layout(pad=2.0)
+    pyplot.show()
 
 #%% READS DATA
 
 # Reads images (subset)
-images = search_files(paths['aleppo'], 'images.*tif$')[-1:]
+images = search_data(pattern(city='aleppo', type='image'))[-1:]
 images = np.array(list(map(read_raster, images)))
 images = images_to_tiles(images, tile_size=(128, 128))
 
 # Reads labels (subset)
-labels = search_files(paths['aleppo'], 'label.*tif$')[-1:]
+labels = search_data(pattern(city='aleppo', type='label'))[-1:]
 labels = np.array(list(map(read_raster, labels)))
-labels = images_to_tiles(labels, tile_size=(1, 1))
+labels = utils.images_to_tiles(labels, tile_size=(1, 1))
 labels = np.squeeze(labels, axis=(2, 3)).astype(float)
 
 # Samples tiles (temporary)
@@ -84,7 +103,7 @@ train_generator = train_generator.flow(images_train, labels_train, batch_size=32
 
 # Initialises model
 args  = dict(shape=(64, 64, 3), filters=16, units=32, dropout=0.1)
-model = convolutional_network(**args)
+model = models.convolutional_network(**args)
 model.compile(optimizer='adam', loss='binary_focal_crossentropy', metrics='accuracy')
 # display_structure(model, '../models/convolutional_network')
 

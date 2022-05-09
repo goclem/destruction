@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 '''
-@description: Initlaises model structures
+@description: Initlaises models
 @author: Clement Gorin
 @contact: gorinclem@gmail.com
 @version: 2022.05.09

@@ -32,3 +32,22 @@ sequence = np.tile(sequence, 9).reshape(3, 3, len(sequence))
 sequence = sequence.reshape(3 * 3, 6)
 sequence = np.apply_along_axis(generate_sequences, 1, sequence)
 # %%
+
+import re
+from destruction_utilities import search_files
+
+
+def make_pattern(city:str='.*', type:str='.*', date:str='.*', ext:str='tif'):
+    pattern = f'^.*{city}/.*/{type}_{date}\.{ext}$'
+    return pattern
+
+search_files('../data', pattern=pattern)
+
+def search_files(directory:str, pattern:dict='.') -> list:
+    files = list()
+    for root, _, file_names in os.walk(directory):
+        for file_name in file_names:
+            files.append(os.path.join(root, file_name))
+    files = list(filter(re.compile(pattern).search, files))
+    files.sort()
+    return files

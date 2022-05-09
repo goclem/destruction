@@ -12,18 +12,21 @@
 # Modules
 import numpy as np
 import pandas as pd
-import rasterio
 import os
+import rasterio
 import re
 
-from numpy import random
 from matplotlib import pyplot
 from tensorflow.keras import utils
 
 #%% FILE UTILITIES
 
+# Builds regular expression for search_data
+def pattern(city:str='.*', type:str='.*', date:str='.*', ext:str='tif'):
+    return f'^.*{city}/.*/{type}_{date}\.{ext}$'
+
 # Sorted list of files in a directory that match a regular expression
-def search_files(directory:str, pattern:str='.') -> list:
+def search_data(pattern:str='.*', directory:str='../data') -> list:
     files = list()
     for root, _, file_names in os.walk(directory):
         for file_name in file_names:
@@ -115,19 +118,6 @@ def compare(images:list, titles:list=['Image'], cmaps:list=['gray']) -> None:
         ax.set_title(title, fontsize=15)
         ax.set_axis_off()
     pyplot.tight_layout()
-    pyplot.show()
-
-# Displays model training history
-def display_history(history:dict, stats:list=['accuracy', 'loss']) -> None:
-    fig, axs = pyplot.subplots(nrows=1, ncols=2, figsize=(10, 5))
-    for ax, stat in zip(axs.ravel(), stats):
-        ax.plot(history[stat])
-        ax.plot(history[f'val_{stat}'])
-        ax.set_title(f'Training {stat}', fontsize=15)
-        ax.set_ylabel('Accuracy')
-        ax.set_xlabel('Epoch')
-        ax.legend(['Training sample', 'Validation sample'], frameon=False)
-    pyplot.tight_layout(pad=2.0)
     pyplot.show()
 
 # Displays model structure
