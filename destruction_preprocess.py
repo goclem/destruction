@@ -18,16 +18,12 @@ import re
 from numpy import random
 from os import path
 from rasterio import features
-from destruction_utilities import display, search_files
-
-# Paths
-city  = 'aleppo'
-paths = dict(aleppo='../data/aleppo')
+from destruction_utilities import *
 
 #%% FUNCTIONS
     
-# Computes raster profile for tiles
 def tiled_profile(source:str, tile_size:tuple=(128, 128, 1)):
+    '''Computes raster profile for tiles'''
     raster  = rasterio.open(source)
     profile = raster.profile
     assert profile['width']  % tile_size[0] == 0, 'Invalid dimensions'
@@ -37,8 +33,8 @@ def tiled_profile(source:str, tile_size:tuple=(128, 128, 1)):
     profile.update(width=profile['width'] // tile_size[0], height=profile['height'] // tile_size[0], count=tile_size[2], transform=affine)
     return profile
 
-# Tranforms vector data into raster
 def rasterise(source:str, profile:tuple, attribute:str=None, dtype:str='uint8'):
+    '''Tranforms vector data into raster'''
     vector     = geopandas.read_file(source)
     geometries = vector['geometry']
     if attribute is not None:
@@ -50,15 +46,16 @@ def rasterise(source:str, profile:tuple, attribute:str=None, dtype:str='uint8'):
 #%% COMPUTES TILES
 
 # Files
-image      = search_files(paths[city], pattern='image.*tif$')[0]
-settlement = search_files(paths[city], pattern='settlement.*gpkg$')[0]
-noanalysis = search_files(paths[city], pattern='noanalysis.*gpkg$')[0]
+image      = search_data(pattern(city='aleppo', type='image'))[0]
+settlement = search_data('aleppo_settlement.*gpkg$')
+noanalysis = search_data('aleppo_noanalysis.*gpkg$')
 
 # Computes analysis zone
 profile    = tiled_profile(source=image, tile_size=(128, 128, 1))
-noanalysis = rasterise(source=noanalysis, profile=profile, dtype='bool')
 settlement = rasterise(source=settlement, profile=profile, dtype='bool')
+noanalysis = rasterise(source=noanalysis, profile=profile, dtype='bool')
 analysis   = np.logical_and(settlement, np.invert(noanalysis))
+del image, settlement, noanalysis
 
 # Splits samples
 random.seed(1)
@@ -66,26 +63,24 @@ index   = dict(training=0.70, validation=0.15, test=0.15)
 index   = np.random.choice(np.arange(len(index)) + 1, np.sum(analysis), p=list(index.values()))
 samples = analysis.astype(int)
 np.place(samples, analysis, index)
+del index
 
 # Saves sample raster
-profile.update(nodata=0)
-with rasterio.open(fp=path.join(paths[city], 'vectors', 'aleppo_samples.tif'), mode='w', **profile) as dest:
-    dest.write(np.expand_dims(samples, 0))
-    dest.close()
-del image, settlement, noanalysis, analysis, index
+write_raster(samples, profile, '../data/aleppo/vectors/aleppo_samples.tif', nodata=0)
+del samples
 
 #%% COMPUTES LABELS
 
 # Reads damage reports
-damage = search_files(directory=paths[city], pattern='damage.*gpkg$')[0]
+damage = search_data('aleppo_damage.*gpkg$')
 damage = geopandas.read_file(damage)
 
 # Extract report dates
-pattern = re.compile('\d{4}-\d{2}-\d{2}')
-dates   = search_files(directory=paths[city], pattern='image.*tif$')
-dates   = [pattern.search(date).group() for date in dates]
-dates   = list(set(dates) - set(damage.columns))
-del pattern
+regex = re.compile('\d{4}-\d{2}-\d{2}')
+dates = search_data(pattern(city='aleppo', type='image'))
+dates = [regex.search(date).group() for date in dates]
+dates = list(set(dates) - set(damage.columns))
+del regex
 
 # Fills missing dates
 damage[dates] = np.nan
@@ -96,17 +91,13 @@ values.fillna(method='bfill', inplace=True)
 damage = geopandas.GeoDataFrame(values.T.astype(int), geometry=damage.geometry)
 del values, dates
 
-# Exports damage labels
+# Writes damage labels
 dates = damage.columns[:-1]
 for date in dates:
     print(date)
-    subset  = damage[[date, 'geometry']].sort_values(by=date)
-    subset  = zip(subset['geometry'], subset[date])
-    subset  = features.rasterize(subset, out_shape=(profile['height'], profile['width']), transform=profile['transform'])
-    subset  = np.where(analysis, subset, -1)
-    outfile = path.join(paths[city], f'labels/label_{date}.tif')
-    profile.update(nadata=-1, datatype='int8')
-    with rasterio.open(fp=outfile, mode='w', **profile) as dest:
-        dest.write(np.expand_dims(subset, 0))
-        dest.close()
-del dates, date, subset, outfile
+    subset = damage[[date, 'geometry']].sort_values(by=date)
+    subset = zip(subset['geometry'], subset[date])
+    subset = features.rasterize(subset, out_shape=(profile['height'], profile['width']), transform=profile['transform'])
+    subset = np.where(analysis, subset, -1)
+    write_raster(subset, profile, f'../data/aleppo/labels/label_{date}.tif', nodata=-1, dtype='int8')
+del dates, date, subset

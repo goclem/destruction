@@ -30,6 +30,7 @@ def search_data(pattern:str='.*', directory:str='../data') -> list:
             files.append(os.path.join(root, file_name))
     files = list(filter(re.compile(pattern).search, files))
     files.sort()
+    if len(files) == 1: files = files[0]
     return files
 
 def pattern(city:str='.*', type:str='.*', date:str='.*', ext:str='tif'):
@@ -51,6 +52,8 @@ def read_raster(source:str, band:int=None, dtype:str='uint8') -> np.ndarray:
 
 def write_raster(array:np.ndarray, profile:Union[str, dict], destination:str, nodata:int=None, dtype:str='uint8') -> None:
     '''Writes a numpy array as a raster'''
+    if array.ndim == 2:
+        array = np.expand_dims(array, 2)
     array = array.transpose([2, 0, 1]).astype(dtype)
     bands, height, width = array.shape
     if isinstance(profile, str):
