@@ -44,7 +44,7 @@ def rasterise(source, profile:tuple, attribute:str=None, dtype:str='uint8') -> n
     image  = image.astype(dtype)
     return image
 
-#%% COMPUTES TILES
+#%% COMPUTES TILE SAMPLES
 
 # Files
 image      = search_data(pattern(city='aleppo', type='image'))[0]
