@@ -33,6 +33,11 @@ def tiled_profile(source:str, tile_size:tuple=(128, 128, 1)) -> dict:
     profile.update(width=profile['width'] // tile_size[0], height=profile['height'] // tile_size[0], count=tile_size[2], transform=affine)
     return profile
 
+def get_dates(files:list) -> list:
+    regex = re.compile('\d{4}-\d{2}-\d{2}')
+    dates = [regex.search(file).group() for file in files]
+    return dates
+
 #%% COMPUTES TILE SAMPLES
 
 # Files
@@ -63,23 +68,20 @@ damage = search_data('aleppo_damage.*gpkg$')
 damage = geopandas.read_file(damage)
 
 # Extract report dates
-regex = re.compile('\d{4}-\d{2}-\d{2}')
 dates = search_data(pattern(city='aleppo', type='image'))
-dates = [regex.search(date).group() for date in dates]
-dates = list(set(dates) - set(damage.columns))
-del regex
+dates = get_dates(dates)
 
 # Fills missing dates
-damage[dates] = np.nan
+damage[list(set(dates) - set(damage.columns))] = np.nan
 damage = damage.reindex(sorted(damage.columns), axis=1)
 values = damage.drop(columns='geometry').T
 values.fillna(method='ffill', inplace=True)
 values.fillna(method='bfill', inplace=True)
 damage = geopandas.GeoDataFrame(values.T.astype(int), geometry=damage.geometry)
-del values, dates
+damage = damage[dates + ['geometry']] # Drops dates not in images
+del values
 
 # Writes damage labels
-dates = damage.columns[:-1]
 for date in dates:
     print(date)
     subset = damage[[date, 'geometry']].sort_values(by=date) # Sorting takes the max per pixel

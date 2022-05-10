@@ -19,7 +19,7 @@ import re
 
 from typing import Union
 from matplotlib import pyplot
-from rasterio import features
+from rasterio import features, windows
 from tensorflow.keras import utils
 
 #%% FILE UTILITIES
@@ -52,7 +52,7 @@ def read_raster(source:str, band:int=None, window=None, dtype:str='uint8') -> np
     image = image.transpose([1, 2, 0]).astype(dtype)
     return image
 
-def write_raster(array:np.ndarray, profile:Union[str, dict], destination:str, nodata:int=None, dtype:str='uint8') -> None:
+def write_raster(array:np.ndarray, profile, destination:str, nodata:int=None, dtype:str='uint8') -> None:
     '''Writes a numpy array as a raster'''
     if array.ndim == 2:
         array = np.expand_dims(array, 2)
@@ -65,7 +65,7 @@ def write_raster(array:np.ndarray, profile:Union[str, dict], destination:str, no
         raster.write(array)
         raster.close()
 
-def rasterise(source, profile:tuple, attribute:str=None, dtype:str='uint8') -> np.ndarray:
+def rasterise(source, profile, attribute:str=None, dtype:str='uint8') -> np.ndarray:
     '''Tranforms vector data into raster'''
     if isinstance(source, str): 
         source = geopandas.read_file(source)
@@ -78,17 +78,30 @@ def rasterise(source, profile:tuple, attribute:str=None, dtype:str='uint8') -> n
     image  = image.astype(dtype)
     return image
 
+def center_window(source:str, size:dict):
+    '''Computes the windows for the centre of a raster'''
+    profile = rasterio.open(source).profile
+    centre  = (profile['width'] // 2, profile['height'] // 2)
+    window  = windows.Window.from_slices(
+        (centre[0] - size[0] // 2, centre[0] + size[0] // 2),
+        (centre[1] - size[1] // 2, centre[1] + size[1] // 2)
+    )
+    return window
+
 #%% ARRAY UTILITIES
 
-def images_to_tiles(images:np.ndarray, tile_size:tuple=(128, 128)) -> np.ndarray:
-    '''Converts images to tiles of a given size'''
+def images_to_sequences(images:np.ndarray, tile_size:tuple=(128, 128)) -> np.ndarray:
+    '''Converts images to sequences of tiles'''
     n_images, image_width, image_height, n_bands = images.shape
     tile_width, tile_height = tile_size
+    assert image_width  % tile_width  == 0
+    assert image_height % tile_height == 0
     n_tiles_width  = (image_width  // tile_width)
     n_tiles_height = (image_height // tile_height)
-    tiles = images.reshape(n_images, n_tiles_width, tile_width, n_tiles_height, tile_height, n_bands).swapaxes(2, 3)
-    tiles = tiles.reshape(-1, tile_width, tile_height, n_bands)
-    return tiles
+    sequence = images.reshape(n_images, n_tiles_width, tile_width, n_tiles_height, tile_height, n_bands)
+    sequence = np.moveaxis(sequence.swapaxes(2, 3), 0, 2)
+    sequence = sequence.reshape(-1, n_images, tile_width, tile_height, n_bands)
+    return sequence
 
 def index_empty(tiles:np.ndarray, value:int=255) -> bool:
     '''Indexes empty blocks'''
