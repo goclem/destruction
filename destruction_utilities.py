@@ -4,7 +4,7 @@
 @description: Utilities
 @author: Clement Gorin
 @contact: gorinclem@gmail.com
-@version: 2022.05.09
+@version: 2022.05.10
 '''
 
 #%% HEADER
@@ -17,7 +17,6 @@ import os
 import rasterio
 import re
 
-from typing import Union
 from matplotlib import pyplot
 from rasterio import features, windows
 from tensorflow.keras import utils

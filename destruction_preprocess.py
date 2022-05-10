@@ -71,7 +71,7 @@ damage = geopandas.read_file(damage)
 dates = search_data(pattern(city='aleppo', type='image'))
 dates = get_dates(dates)
 
-# Fills missing dates
+# Fills missing dates (!) Discuss (!)
 damage[list(set(dates) - set(damage.columns))] = np.nan
 damage = damage.reindex(sorted(damage.columns), axis=1)
 values = damage.drop(columns='geometry').T
