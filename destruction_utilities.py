@@ -35,13 +35,13 @@ def search_data(pattern:str='.*', directory:str='../data') -> list:
     if len(files) == 1: files = files[0]
     return files
 
-def pattern(city:str='.*', type:str='.*', date:str='.*', ext:str='tif'):
+def pattern(city:str='.*', type:str='.*', date:str='.*', ext:str='tif') -> str:
     '''Regular expressions for search_data'''
     return f'^.*{city}/.*/{type}_{date}\.{ext}$'
 
 #%% RASTER UTILITIES
 
-def read_raster(source:str, band:int=None, window=None, dtype:str='uint8') -> np.ndarray:
+def read_raster(source:str, band:int=None, window=None, dtype:str=None) -> np.ndarray:
     '''Reads a raster as a numpy array'''
     raster = rasterio.open(source)
     if band is not None:
@@ -74,8 +74,8 @@ def rasterise(source, profile, attribute:str=None, dtype:str='uint8') -> np.ndar
     geometries = source['geometry']
     if attribute is not None:
         geometries = zip(geometries, source[attribute])
-    image  = features.rasterize(geometries, out_shape=(profile['height'], profile['width']), transform=profile['transform'])
-    image  = image.astype(dtype)
+    image = features.rasterize(geometries, out_shape=(profile['height'], profile['width']), transform=profile['transform'])
+    image = image.astype(dtype)
     return image
 
 def center_window(source:str, size:dict):
@@ -102,12 +102,6 @@ def images_to_sequences(images:np.ndarray, tile_size:tuple=(128, 128)) -> np.nda
     sequence = np.moveaxis(sequence.swapaxes(2, 3), 0, 2)
     sequence = sequence.reshape(-1, n_images, tile_width, tile_height, n_bands)
     return sequence
-
-def index_empty(tiles:np.ndarray, value:int=255) -> bool:
-    '''Indexes empty blocks'''
-    empty = np.full(tiles.shape[1:], value)
-    index = [np.equals(tiles, empty).all() for tile in tiles]
-    return index
 
 #%% DISPLAY UTILITIES
     
