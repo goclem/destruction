@@ -73,7 +73,7 @@ samples = read_raster(samples, window=window, dtype='int8')
 samples = samples.flatten()
 del window
 
-# Split itno samples
+# Split samples
 _, images_train, images_test, images_valid = sample_split(images, samples)
 sequence1, sequence2 = shift_sequences(images_train)
 
@@ -103,3 +103,7 @@ images = np.concatenate((
     np.expand_dims(tile_sequences(images[:-1,...], tile_size), 1), 
     np.expand_dims(tile_sequences(images[1:,...],  tile_size), 1)), 
     1)
+
+# Memory maps
+np.save('../data/aleppo/images/images.npy', images)
+test = np.memmap('../data/aleppo/images/images.npy', shape=(57232, 5, 128, 128, 3))
