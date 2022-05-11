@@ -1,8 +1,5 @@
 # Monitoring war destruction from space using machine learning (continued)
 
-- Authors: Hannes Mueller, Andre Groeger, Clement Gorin
-- Updated: 2022.05.09
-
 Follow-up project using Mueller et al. Monitoring war destruction from space using machine learning. Proceedings of the National Academy of Sciences, 118(23), 2021.
 
 ## Scripts

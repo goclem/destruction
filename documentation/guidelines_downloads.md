@@ -1,6 +1,6 @@
 # Guidelines for downloading rasters
 
-Updated 2022-05-09 
+Updated on 2022.05.09 by Clément
 
 ## Download
 
