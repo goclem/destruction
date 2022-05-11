@@ -4,7 +4,7 @@
 @description: Optimises models
 @author: Clement Gorin
 @contact: gorinclem@gmail.com
-@version: 2022.05.09
+@version: 2022.05.11
 '''
 
 #%% HEADER
@@ -33,11 +33,6 @@ def tiled_profile(source:str, tile_size:tuple=(128, 128, 1)) -> dict:
     profile.update(width=profile['width'] // tile_size[0], height=profile['height'] // tile_size[0], count=tile_size[2], transform=affine)
     return profile
 
-def get_dates(files:list) -> list:
-    regex = re.compile('\d{4}-\d{2}-\d{2}')
-    dates = [regex.search(file).group() for file in files]
-    return dates
-
 #%% COMPUTES TILE SAMPLES
 
 # Files
@@ -59,7 +54,7 @@ index   = np.random.choice(np.arange(len(index)) + 1, np.sum(analysis), p=list(i
 samples = analysis.astype(int)
 np.place(samples, analysis, index)
 write_raster(samples, profile, '../data/aleppo/vectors/aleppo_samples.tif', nodata=-1, dtype='int8')
-del index, samples
+del index, samples, analysis
 
 #%% COMPUTES LABELS
 
@@ -69,7 +64,7 @@ damage = geopandas.read_file(damage)
 
 # Extract report dates
 dates = search_data(pattern(city='aleppo', type='image'))
-dates = get_dates(dates)
+dates = extract(dates, '\d{4}-\d{2}-\d{2}')
 
 # Fills missing dates (!) Discuss (!)
 damage[list(set(dates) - set(damage.columns))] = np.nan
@@ -86,7 +81,6 @@ for date in dates:
     print(date)
     subset = damage[[date, 'geometry']].sort_values(by=date) # Sorting takes the max per pixel
     subset = rasterise(subset, profile, date)
-    subset = np.where(analysis, subset, -1)
     write_raster(subset, profile, f'../data/aleppo/labels/label_{date}.tif', nodata=-1, dtype='int8')
 del dates, date, subset
 # %%

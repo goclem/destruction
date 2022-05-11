@@ -4,7 +4,7 @@
 @description: Utilities
 @author: Clement Gorin
 @contact: gorinclem@gmail.com
-@version: 2022.05.10
+@version: 2022.05.11
 '''
 
 #%% HEADER
@@ -37,6 +37,11 @@ def search_data(pattern:str='.*', directory:str='../data') -> list:
 def pattern(city:str='.*', type:str='.*', date:str='.*', ext:str='tif') -> str:
     '''Regular expressions for search_data'''
     return f'^.*{city}/.*/{type}_{date}\.{ext}$'
+
+def extract(files:list, pattern:str='\d{4}-\d{2}-\d{2}') -> list:
+    pattern = re.compile(pattern)
+    match   = [pattern.search(file).group() for file in files]
+    return match
 
 #%% RASTER UTILITIES
 
@@ -89,7 +94,7 @@ def center_window(source:str, size:dict):
 
 #%% ARRAY UTILITIES
 
-def images_to_sequences(images:np.ndarray, tile_size:tuple=(128, 128)) -> np.ndarray:
+def tile_sequences(images:np.ndarray, tile_size:tuple=(128, 128)) -> np.ndarray:
     '''Converts images to sequences of tiles'''
     n_images, image_width, image_height, n_bands = images.shape
     tile_width, tile_height = tile_size
