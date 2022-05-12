@@ -23,16 +23,8 @@ from os import path
 
 #%% FUNCTIONS
 
-# Splits the data multiple samples
-def sample_split(images:np.ndarray, sizes:dict, seed:int=1) -> list:
-    random.seed(seed)
-    samples = list(sizes.keys())
-    indexes = random.choice(samples, images.shape[0], p=list(sizes.values()))
-    samples = [images[indexes == sample, ...] for sample in samples]
-    return samples
-
-# Displays model training history
 def display_history(history:dict, stats:list=['accuracy', 'loss']) -> None:
+    '''Displays model training history'''
     fig, axs = pyplot.subplots(nrows=1, ncols=2, figsize=(10, 5))
     for ax, stat in zip(axs.ravel(), stats):
         ax.plot(history[stat])
