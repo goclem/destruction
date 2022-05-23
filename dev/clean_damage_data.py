@@ -30,7 +30,7 @@ for i, damage_class_col in enumerate(damage_class_columns):
         allClasses = allClasses.append(df[damage_class_col])
         
 class_values = allClasses.unique()
-print("All classes: {}".format(class_values.unique()))
+print("All classes: {}".format(class_values))
 
 
 for i, date in enumerate(sensor_date_values):
