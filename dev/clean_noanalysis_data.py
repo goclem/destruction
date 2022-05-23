@@ -3,10 +3,17 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument("input_file_path", help="Path to the input raw damage .gpkg")
+parser.add_argument("--suffix", help="Suffix to add to output filename (default: '')")
+
 
 args = parser.parse_args()
 INPUT_PATH = args.input_file_path
+SUFFIX = ""
+
+if args.suffix:
+    SUFFIX = args.suffix
+
 
 df = gpd.read_file(INPUT_PATH)
 df.columns = ['reason', 'geometry']
-df.to_file(INPUT_PATH.split(".gpkg")[0]+"__processed.gpkg", driver="GPKG")
+df.to_file(INPUT_PATH.split(".gpkg")[0] + SUFFIX + ".gpkg", driver="GPKG")
