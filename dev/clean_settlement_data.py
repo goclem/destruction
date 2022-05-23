@@ -2,6 +2,7 @@ import geopandas as gpd
 import argparse
 
 parser = argparse.ArgumentParser()
+parser.add_argument("input_file_path", help="Path to the input raw damage .gpkg")
 parser.add_argument("--suffix", help="Suffix to add to output filename (default: '')")
 
 
