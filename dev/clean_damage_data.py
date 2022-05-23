@@ -10,9 +10,9 @@ args = parser.parse_args()
 INPUT_PATH = args.input_file_path
 
 df = gpd.read_file(INPUT_PATH)
-
 sensor_date_columns = [col for col in df.columns if 'SensDt' in col]
 damage_class_columns = [col for col in df.columns if 'DmgCls' in col and 'GrpDmgCls' not in col ]
+
 
 for i, sensor_date_col in enumerate(sensor_date_columns):
     if i==0:
@@ -22,19 +22,20 @@ for i, sensor_date_col in enumerate(sensor_date_columns):
         
 sensor_date_values = allDates.unique()
 sensor_date_values = sensor_date_values[sensor_date_values != np.array(None)]
-        
-for i, damage_class_col in enumerate(damage_class_columns):
-    if i==0:
-        allClasses = df[damage_class_col]
-    else:
-        allClasses = allClasses.append(df[damage_class_col])
-        
-class_values = allClasses.unique()
-print("All classes: {}".format(class_values))
 
+new_df = []
+for i, row in df.iterrows():
 
-for i, date in enumerate(sensor_date_values):
-    df[date] = df[damage_class_columns[i]]
+    row_entry = {}
+    row_entry['geometry'] = row['geometry']
     
-df = df[[*sensor_date_values, 'geometry']]
+    for j, sensor_date_col in enumerate(sensor_date_columns):
+        if(row[sensor_date_col] != None):
+            row_entry[row[sensor_date_col]] = row[damage_class_columns[j]]
+    
+    new_df.append(row_entry)
+
+
+df = gpd.GeoDataFrame(new_df)
+print("Unique_values: {}".format(df[df.columns[1]].unique()))
 df.to_file(INPUT_PATH.split(".gpkg")[0]+"__processed.gpkg", driver="GPKG")
