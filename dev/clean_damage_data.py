@@ -22,6 +22,15 @@ for i, sensor_date_col in enumerate(sensor_date_columns):
         
 sensor_date_values = allDates.unique()
 sensor_date_values = sensor_date_values[sensor_date_values != np.array(None)]
+        
+for i, damage_class_col in enumerate(damage_class_columns):
+    if i==0:
+        allClasses = df[damage_class_col]
+    else:
+        allClasses = allClasses.append(df[damage_class_col])
+        
+class_values = allClasses.unique()
+print("All classes: {}".format(class_values.unique()))
 
 
 for i, date in enumerate(sensor_date_values):
