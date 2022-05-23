@@ -46,6 +46,6 @@ for i, row in df.iterrows():
 
 
 df = gpd.GeoDataFrame(new_df)
-df = df.replace({np.nan: 0, "Destroyed": 3, "Severe Damage": 2, "Moderate Damage": 1})
+df = df.replace({np.nan: 0, "Destroyed": 3, "Severe Damage": 2, "Moderate Damage": 1, "No Visible Damage": 0})
 print("Unique_values: {}".format(df[df.columns[1]].unique()))
 df.to_file(INPUT_PATH.split(".gpkg")[0] + SUFFIX + ".gpkg", driver="GPKG")
