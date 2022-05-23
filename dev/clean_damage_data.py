@@ -5,9 +5,18 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument("input_file_path", help="Path to the input raw damage .gpkg")
+parser.add_argument("--suffix", help="Suffix to add to output filename (default: '')")
+
 
 args = parser.parse_args()
 INPUT_PATH = args.input_file_path
+SUFFIX = ""
+
+
+if args.suffix:
+    SUFFIX = args.suffix
+
+
 
 df = gpd.read_file(INPUT_PATH)
 sensor_date_columns = [col for col in df.columns if 'SensDt' in col]
@@ -37,5 +46,6 @@ for i, row in df.iterrows():
 
 
 df = gpd.GeoDataFrame(new_df)
+df = df.replace({np.nan: 0, "Destroyed": 3, "Severe Damage": 2, "Moderate Damage": 1})
 print("Unique_values: {}".format(df[df.columns[1]].unique()))
-df.to_file(INPUT_PATH.split(".gpkg")[0]+"__processed.gpkg", driver="GPKG")
+df.to_file(INPUT_PATH.split(".gpkg")[0] + SUFFIX + ".gpkg", driver="GPKG")
