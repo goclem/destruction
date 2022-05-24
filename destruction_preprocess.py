@@ -94,4 +94,3 @@ for date in dates:
     subset = rasterise(subset, profile, date)
     write_raster(subset, profile, f'../data/{CITY}/labels/label_{date}.tif', nodata=-1, dtype='int8')
 del dates, date, subset
-
