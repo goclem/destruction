@@ -138,3 +138,67 @@ def display_structure(model, path:str) -> None:
     summary = pd.DataFrame([dict(Name=layer.name, Type=layer.__class__.__name__, Shape=layer.output_shape, Params=layer.count_params()) for layer in model.layers])
     summary.style.to_html(f'{path}.html', index=False) 
     utils.plot_model(model, to_file=f'{path}.pdf', show_shapes=True)
+    
+    
+#% ONE TIME DATA PREP UTILS
+# Prepare damage data in the format needed by ML architecture
+def prep_damage(city:str, suffix:str, datadir:str) -> None:
+    '''One time run to prep damage data for a given city'''
+    path = search_data(city+'_damage.*gpkg', datadir)
+    print(path)
+    damage = geopandas.read_file(path)
+    
+    sensor_date_columns = [col for col in damage.columns if 'SensDt' in col]
+    damage_class_columns = [col for col in damage.columns if 'DmgCls' in col and 'GrpDmgCls' not in col ]
+    
+    
+    for i, sensor_date_col in enumerate(sensor_date_columns):
+        if i==0:
+            allDates = damage[sensor_date_col]
+        else:
+            allDates = allDates.append(damage[sensor_date_col])
+
+    sensor_date_values = allDates.unique()
+    sensor_date_values = sensor_date_values[sensor_date_values != np.array(None)]
+    
+    new_damage = []
+    for i, row in damage.iterrows():
+
+        row_entry = {}
+        row_entry['geometry'] = row['geometry']
+
+        for j, sensor_date_col in enumerate(sensor_date_columns):
+            if(row[sensor_date_col] != None):
+                row_entry[row[sensor_date_col]] = row[damage_class_columns[j]]
+
+        new_damage.append(row_entry)
+
+
+    df = geopandas.GeoDataFrame(new_damage)
+    df = df.replace({np.nan: 0, "Destroyed": 3, "Severe Damage": 2, "Moderate Damage": 1, "No Visible Damage": 0})
+    df.to_file(path.split(".gpkg")[0] + suffix + ".gpkg", driver="GPKG")
+
+# Prepare settlement data in the format needed by ML architecture
+def prep_settlement(city: str, suffix: str, datadir: str) -> None:
+    '''One time manual run to prep settlement data for a given city'''
+    path = search_data(city+'_settlement.*gpkg', datadir)
+    print(path)
+    settlement = geopandas.read_file(path)
+    settlement = settlement.filter(['geometry'])
+    settlement.to_file(path.split(".gpkg")[0] + suffix + ".gpkg", driver="GPKG")
+    
+# Prepare noanalysis data in the format needed by ML architecture
+def prep_noanalysis(city: str, suffix: str, datadir:str) -> None:
+    '''One time manual run to prep noanalysis data for a given city'''
+    path = search_data(city+'_noanalysis.*gpkg', datadir)
+    print(path)
+    noanalysis = geopandas.read_file(path)
+    noanalysis.columns = ['reason', 'geometry']
+    noanalysis.to_file(path.split(".gpkg")[0] + suffix + ".gpkg", driver="GPKG")
+    
+# Helper to prepare all data for a given city at once
+def prep_all(city:str, suffix: str, datadir: str) -> None:
+    '''One time script to prep damage, noanalysis, and settlement data'''
+    prep_damage(city, suffix, datadir)
+    prep_settlement(city, suffix, datadir)
+    prep_noanalysis(city, suffix, datadir)
