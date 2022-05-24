@@ -1,6 +1,7 @@
 # Data guidelines
 
 Updated 2022-05-11 by Clément
+Updated 2022-05-24 by Arogya
 
 ## Structure
 
@@ -81,15 +82,16 @@ Updated 2022-05-11 by Clément
 - Validate geometries
 - Separate cities
 
+
 **Damage**
 
 - Name: `[city]_damage.gpkg`
 - Variables (integer):
 	- Names: `[yyyy-mm-dd]` (one per census)
 	- Values:
-		- `1` low destruction
-		- `2` medium destruction
-		- `3` high destruction
+		- `1` Moderate Damage
+		- `2` Severe Damage
+		- `3` Destroyed
 		- `0` otherwise
 
 **Noanalysis**
