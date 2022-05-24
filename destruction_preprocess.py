@@ -2,9 +2,15 @@
 # -*- coding: utf-8 -*-
 '''
 @description: Optimises models
+<<<<<<< HEAD
 @author: Clement Gorin, Arogya K
 @contact: gorinclem@gmail.com; arogya@berkeley.edu
 @version: 2022.06.02
+=======
+@author: Clement Gorin
+@contact: gorinclem@gmail.com
+@version: 2022.05.11
+>>>>>>> d652d61 (updated shp prep scripts based on clement's suggestions)
 '''
 
 #%% HEADER
@@ -94,3 +100,7 @@ for date in dates:
     subset = rasterise(subset, profile, date)
     write_raster(subset, profile, f'../data/{CITY}/labels/label_{date}.tif', nodata=-1, dtype='int8')
 del dates, date, subset
+<<<<<<< HEAD
+=======
+# %%
+>>>>>>> d652d61 (updated shp prep scripts based on clement's suggestions)
