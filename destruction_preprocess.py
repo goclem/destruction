@@ -82,6 +82,11 @@ for date in dates:
     print(date)
     subset = damage[[date, 'geometry']].sort_values(by=date) # Sorting takes the max per pixel
     subset = rasterise(subset, profile, date)
-    write_raster(subset, profile, f'../data/{city}/labels/label_{date}.tif', nodata=-1, dtype='int8')
+    write_raster(subset, profile, f'../data/{city}/labels/label_{date}.tif', dtype='int8')
 del dates, date, subset
 # %%
+
+# ? 0 ? 0 ? 1 ? 1 ?
+# 0 0 0 0 ? 1 1 1 1
+# 0 0 0 0 0 1 1 1 1
+# 0 0 0 0 1 1 1 1 1
