@@ -12,7 +12,6 @@
 # Modules
 import numpy as np
 import itertools
-from destruction_preprocess import *
 
 # Generates sequences of an arbitatry length
 def generate_sequences(sequence:bool, size:int=2) -> list:

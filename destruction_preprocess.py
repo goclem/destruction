@@ -2,9 +2,15 @@
 # -*- coding: utf-8 -*-
 '''
 @description: Optimises models
+<<<<<<< HEAD
 @author: Clement Gorin, Arogya K
 @contact: gorinclem@gmail.com; arogya@berkeley.edu
 @version: 2022.06.02
+=======
+@author: Clement Gorin
+@contact: gorinclem@gmail.com
+@version: 2022.05.25
+>>>>>>> 0c06054 (Update 2022.05.25)
 '''
 
 #%% HEADER
@@ -40,9 +46,16 @@ CITY = 'daraa'
 #%% COMPUTES TILE SAMPLES
 
 # Files
+<<<<<<< HEAD
 image      = search_data(pattern(city=CITY, type='image'))[0]
 settlement = search_data(f'{CITY}_settlement.*gpkg$')
 noanalysis = search_data(f'{CITY}_noanalysis.*gpkg$')
+=======
+city       = 'aleppo'
+image      = search_data(pattern(city=city, type='image'))[0]
+settlement = search_data(f'{city}_settlement\\.gpkg$')
+noanalysis = search_data(f'{city}_noanalysis\\.gpkg$')
+>>>>>>> 0c06054 (Update 2022.05.25)
 
 # Computes analysis zone
 profile    = tiled_profile(image, tile_size=(128, 128, 1))
