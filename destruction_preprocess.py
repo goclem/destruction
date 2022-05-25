@@ -4,7 +4,7 @@
 @description: Optimises models
 @author: Clement Gorin
 @contact: gorinclem@gmail.com
-@version: 2022.05.11
+@version: 2022.05.25
 '''
 
 #%% HEADER
@@ -36,9 +36,10 @@ def tiled_profile(source:str, tile_size:tuple=(128, 128, 1)) -> dict:
 #%% COMPUTES TILE SAMPLES
 
 # Files
-image      = search_data(pattern(city='aleppo', type='image'))[0]
-settlement = search_data('aleppo_settlement.*gpkg$')
-noanalysis = search_data('aleppo_noanalysis.*gpkg$')
+city       = 'aleppo'
+image      = search_data(pattern(city=city, type='image'))[0]
+settlement = search_data(f'{city}_settlement\\.gpkg$')
+noanalysis = search_data(f'{city}_noanalysis\\.gpkg$')
 
 # Computes analysis zone
 profile    = tiled_profile(image, tile_size=(128, 128, 1))
@@ -53,17 +54,17 @@ index   = dict(training=0.70, validation=0.15, test=0.15)
 index   = np.random.choice(np.arange(len(index)) + 1, np.sum(analysis), p=list(index.values()))
 samples = analysis.astype(int)
 np.place(samples, analysis, index)
-write_raster(samples, profile, '../data/aleppo/others/aleppo_samples.tif', nodata=-1, dtype='int8')
+write_raster(samples, profile, f'../data/{city}/others/{city}_samples.tif', nodata=-1, dtype='int8')
 del index, samples, analysis
 
 #%% COMPUTES LABELS
 
 # Reads damage reports
-damage = search_data('aleppo_damage.*gpkg$')
+damage = search_data(f'{city}_damage.*gpkg$')
 damage = geopandas.read_file(damage)
 
 # Extract report dates
-dates = search_data(pattern(city='aleppo', type='image'))
+dates = search_data(pattern(city=city, type='image'))
 dates = extract(dates, '\d{4}-\d{2}-\d{2}')
 
 # Fills missing dates (!) Discuss (!)
@@ -81,6 +82,6 @@ for date in dates:
     print(date)
     subset = damage[[date, 'geometry']].sort_values(by=date) # Sorting takes the max per pixel
     subset = rasterise(subset, profile, date)
-    write_raster(subset, profile, f'../data/aleppo/labels/label_{date}.tif', nodata=-1, dtype='int8')
+    write_raster(subset, profile, f'../data/{city}/labels/label_{date}.tif', nodata=-1, dtype='int8')
 del dates, date, subset
 # %%
