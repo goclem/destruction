@@ -72,21 +72,18 @@ dates = search_data(pattern(city=CITY, type='image'))
 dates = extract(dates, '\d{4}_\d{2}_\d{2}')
 dates= list(map(lambda x: x.replace("_", "-"), dates))
 
-
 # # Fills missing dates (!) Discuss (!)
 damage[list(set(dates) - set(damage.columns))] = np.nan
 damage = damage.reindex(sorted(damage.columns), axis=1)
-values = damage.drop(columns='geometry').T
-first =list(values[:values[0].first_valid_index()].T.columns)
-del first[-1]
-values.loc[first] = -1
-last =list(values[values[0].last_valid_index():].T.columns)
-values.loc[last] = values.loc[last].fillna(method='ffill')
-values[values.fillna(method='ffill') != values.fillna(method='bfill')] = -1
-values = values.fillna(method='ffill')
-damage = geopandas.GeoDataFrame(values.T.astype(int), geometry=damage.geometry)
+damage_geom = damage.geometry
+damage = damage.drop(columns='geometry')
+damage.insert(0,-1,-1)
+damage['9999'] = damage[damage.T.last_valid_index()]
+values = damage.T.fillna(method='ffill').fillna(method='bfill')
+temp = damage.T.fillna(method='bfill').fillna(method='ffill')
+values[values != temp] = -1
+damage = geopandas.GeoDataFrame(values.T.drop([-1, '9999'], axis=1), geometry=damage_geom)
 damage = damage[dates + ['geometry']] # Drops dates not in images
-del values
 
 # Writes damage labels
 for date in dates:
