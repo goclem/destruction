@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 '''
 @description: Optimises models
-@author: Clement Gorin
-@contact: gorinclem@gmail.com
+@author: Clement Gorin, Arogya K
+@contact: gorinclem@gmail.com; arogya@berkeley.edu
 @version: 2022.05.11
 '''
 
@@ -33,12 +33,16 @@ def tiled_profile(source:str, tile_size:tuple=(128, 128, 1)) -> dict:
     profile.update(width=profile['width'] // tile_size[0], height=profile['height'] // tile_size[0], count=tile_size[2], transform=affine)
     return profile
 
+
+#%% DECLARATION
+CITY = 'daraa'
+
 #%% COMPUTES TILE SAMPLES
 
 # Files
-image      = search_data(pattern(city='aleppo', type='image'))[0]
-settlement = search_data('aleppo_settlement.*gpkg$')
-noanalysis = search_data('aleppo_noanalysis.*gpkg$')
+image      = search_data(pattern(city=CITY, type='image'))[0]
+settlement = search_data(f'{CITY}_settlement.*gpkg$')
+noanalysis = search_data(f'{CITY}_noanalysis.*gpkg$')
 
 # Computes analysis zone
 profile    = tiled_profile(image, tile_size=(128, 128, 1))
@@ -53,25 +57,33 @@ index   = dict(training=0.70, validation=0.15, test=0.15)
 index   = np.random.choice(np.arange(len(index)) + 1, np.sum(analysis), p=list(index.values()))
 samples = analysis.astype(int)
 np.place(samples, analysis, index)
-write_raster(samples, profile, '../data/aleppo/others/aleppo_samples.tif', nodata=-1, dtype='int8')
+write_raster(samples, profile, f'../data/{CITY}/others/{CITY}_samples.tif', nodata=-1, dtype='int8')
 del index, samples, analysis
+
 
 #%% COMPUTES LABELS
 
 # Reads damage reports
-damage = search_data('aleppo_damage.*gpkg$')
+damage = search_data(f'{CITY}_damage.*gpkg$')
 damage = geopandas.read_file(damage)
 
 # Extract report dates
-dates = search_data(pattern(city='aleppo', type='image'))
-dates = extract(dates, '\d{4}-\d{2}-\d{2}')
+dates = search_data(pattern(city=CITY, type='image'))
+dates = extract(dates, '\d{4}_\d{2}_\d{2}')
+dates= list(map(lambda x: x.replace("_", "-"), dates))
 
-# Fills missing dates (!) Discuss (!)
+
+# # Fills missing dates (!) Discuss (!)
 damage[list(set(dates) - set(damage.columns))] = np.nan
 damage = damage.reindex(sorted(damage.columns), axis=1)
 values = damage.drop(columns='geometry').T
-values.fillna(method='ffill', inplace=True)
-values.fillna(method='bfill', inplace=True)
+first =list(values[:values[0].first_valid_index()].T.columns)
+del first[-1]
+values.loc[first] = -1
+last =list(values[values[0].last_valid_index():].T.columns)
+values.loc[last] = values.loc[last].fillna(method='ffill')
+values[values.fillna(method='ffill') != values.fillna(method='bfill')] = -1
+values = values.fillna(method='ffill')
 damage = geopandas.GeoDataFrame(values.T.astype(int), geometry=damage.geometry)
 damage = damage[dates + ['geometry']] # Drops dates not in images
 del values
@@ -81,6 +93,6 @@ for date in dates:
     print(date)
     subset = damage[[date, 'geometry']].sort_values(by=date) # Sorting takes the max per pixel
     subset = rasterise(subset, profile, date)
-    write_raster(subset, profile, f'../data/aleppo/labels/label_{date}.tif', nodata=-1, dtype='int8')
+    write_raster(subset, profile, f'../data/{CITY}/labels/label_{date}.tif', nodata=-1, dtype='int8')
 del dates, date, subset
 # %%
