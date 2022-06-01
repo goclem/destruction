@@ -3,6 +3,7 @@
 '''
 @description: Optimises models
 <<<<<<< HEAD
+<<<<<<< HEAD
 @author: Clement Gorin, Arogya K
 @contact: gorinclem@gmail.com; arogya@berkeley.edu
 @version: 2022.06.02
@@ -11,6 +12,11 @@
 @contact: gorinclem@gmail.com
 @version: 2022.05.25
 >>>>>>> 0c06054 (Update 2022.05.25)
+=======
+@author: Clement Gorin, Arogya K
+@contact: gorinclem@gmail.com; arogya@berkeley.edu
+@version: 2022.06.01
+>>>>>>> 921cc39 (Update 2022.06.01)
 '''
 
 #%% HEADER
@@ -27,7 +33,7 @@ from rasterio import features
 from destruction_utilities import *
 
 #%% FUNCTIONS
-
+    
 def tiled_profile(source:str, tile_size:tuple=(128, 128, 1)) -> dict:
     '''Computes raster profile for tiles'''
     raster  = rasterio.open(source)
@@ -46,16 +52,10 @@ CITY = 'daraa'
 #%% COMPUTES TILE SAMPLES
 
 # Files
-<<<<<<< HEAD
 image      = search_data(pattern(city=CITY, type='image'))[0]
 settlement = search_data(f'{CITY}_settlement.*gpkg$')
 noanalysis = search_data(f'{CITY}_noanalysis.*gpkg$')
-=======
-city       = 'aleppo'
-image      = search_data(pattern(city=city, type='image'))[0]
-settlement = search_data(f'{city}_settlement\\.gpkg$')
-noanalysis = search_data(f'{city}_noanalysis\\.gpkg$')
->>>>>>> 0c06054 (Update 2022.05.25)
+
 
 # Computes analysis zone
 profile    = tiled_profile(image, tile_size=(128, 128, 1))
@@ -85,11 +85,8 @@ dates = search_data(pattern(city=CITY, type='image'))
 dates = extract(dates, '\d{4}_\d{2}_\d{2}')
 dates= list(map(lambda x: x.replace("_", "-"), dates))
 
-<<<<<<< HEAD
 # # Fills missing dates (!) Discuss (!)
-=======
-# ! Fills missing dates
->>>>>>> 25cd8d8 (Update 2022.06.01)
+
 damage[list(set(dates) - set(damage.columns))] = np.nan
 damage = damage.reindex(sorted(damage.columns), axis=1)
 damage_geom = damage.geometry
@@ -109,3 +106,4 @@ for date in dates:
     subset = rasterise(subset, profile, date)
     write_raster(subset, profile, f'../data/{CITY}/labels/label_{date}.tif', nodata=-1, dtype='int8')
 del dates, date, subset
+
