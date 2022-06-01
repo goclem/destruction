@@ -21,7 +21,7 @@ from rasterio import features
 from destruction_utilities import *
 
 #%% FUNCTIONS
-    
+
 def tiled_profile(source:str, tile_size:tuple=(128, 128, 1)) -> dict:
     '''Computes raster profile for tiles'''
     raster  = rasterio.open(source)
@@ -67,7 +67,7 @@ damage = geopandas.read_file(damage)
 dates = search_data(pattern(city=city, type='image'))
 dates = extract(dates, '\d{4}-\d{2}-\d{2}')
 
-# Fills missing dates (!) Discuss (!)
+# ! Fills missing dates
 damage[list(set(dates) - set(damage.columns))] = np.nan
 damage = damage.reindex(sorted(damage.columns), axis=1)
 values = damage.drop(columns='geometry').T
@@ -85,8 +85,3 @@ for date in dates:
     write_raster(subset, profile, f'../data/{city}/labels/label_{date}.tif', dtype='int8')
 del dates, date, subset
 # %%
-
-# ? 0 ? 0 ? 1 ? 1 ?
-# 0 0 0 0 ? 1 1 1 1
-# 0 0 0 0 0 1 1 1 1
-# 0 0 0 0 1 1 1 1 1
