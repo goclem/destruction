@@ -69,7 +69,7 @@ def write_raster(array:np.ndarray, profile, destination:str, nodata:int=None, dt
         raster.write(array)
         raster.close()
 
-def rasterise(source, profile, attribute:str=None, dtype:str='uint8') -> np.ndarray:
+def rasterise(source, profile, attribute:str=None, dtype:str='int8') -> np.ndarray:
     '''Tranforms vector data into raster'''
     if isinstance(source, str): 
         source = geopandas.read_file(source)
