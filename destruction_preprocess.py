@@ -27,7 +27,7 @@ from rasterio import features
 from destruction_utilities import *
 
 #%% FUNCTIONS
-    
+
 def tiled_profile(source:str, tile_size:tuple=(128, 128, 1)) -> dict:
     '''Computes raster profile for tiles'''
     raster  = rasterio.open(source)
@@ -85,7 +85,11 @@ dates = search_data(pattern(city=CITY, type='image'))
 dates = extract(dates, '\d{4}_\d{2}_\d{2}')
 dates= list(map(lambda x: x.replace("_", "-"), dates))
 
+<<<<<<< HEAD
 # # Fills missing dates (!) Discuss (!)
+=======
+# ! Fills missing dates
+>>>>>>> 25cd8d8 (Update 2022.06.01)
 damage[list(set(dates) - set(damage.columns))] = np.nan
 damage = damage.reindex(sorted(damage.columns), axis=1)
 damage_geom = damage.geometry
