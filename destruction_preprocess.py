@@ -2,21 +2,9 @@
 # -*- coding: utf-8 -*-
 '''
 @description: Optimises models
-<<<<<<< HEAD
-<<<<<<< HEAD
 @author: Clement Gorin, Arogya K
 @contact: gorinclem@gmail.com; arogya@berkeley.edu
 @version: 2022.06.02
-=======
-@author: Clement Gorin
-@contact: gorinclem@gmail.com
-@version: 2022.05.25
->>>>>>> 0c06054 (Update 2022.05.25)
-=======
-@author: Clement Gorin, Arogya K
-@contact: gorinclem@gmail.com; arogya@berkeley.edu
-@version: 2022.06.01
->>>>>>> 921cc39 (Update 2022.06.01)
 '''
 
 #%% HEADER
