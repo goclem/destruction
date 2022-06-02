@@ -4,7 +4,7 @@
 @description: Optimises models
 @author: Clement Gorin, Arogya K
 @contact: gorinclem@gmail.com; arogya@berkeley.edu
-@version: 2022.05.11
+@version: 2022.06.02
 '''
 
 #%% HEADER
@@ -77,7 +77,7 @@ damage[list(set(dates) - set(damage.columns))] = np.nan
 damage = damage.reindex(sorted(damage.columns), axis=1)
 damage_geom = damage.geometry
 damage = damage.drop(columns='geometry')
-damage.insert(0,-1,-1)
+damage.insert(0,-1,0)
 damage['9999'] = damage[damage.T.last_valid_index()]
 values = damage.T.fillna(method='ffill').fillna(method='bfill')
 temp = damage.T.fillna(method='bfill').fillna(method='ffill')
@@ -92,4 +92,3 @@ for date in dates:
     subset = rasterise(subset, profile, date)
     write_raster(subset, profile, f'../data/{CITY}/labels/label_{date}.tif', nodata=-1, dtype='int8')
 del dates, date, subset
-# %%
