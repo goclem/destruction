@@ -14,10 +14,6 @@ import numpy as np
 from destruction_utilities import *
 
 # Fucntions
-def sample_split(images:np.ndarray, samples:dict) -> list:
-    '''Splits the data structure into multiple samples'''
-    samples = [images[samples == value, ...] for value in np.unique(samples)]
-    return samples
 
 # Reads images as sequences (20x20 tile subset)
 tile_size = (128, 128)
@@ -26,11 +22,6 @@ window  = center_window(images[0], (20*tile_size[0], 20*tile_size[1]))
 images  = np.array([read_raster(image, window=window, dtype='uint8') for image in images])
 images  = tile_sequences(images, tile_size)
 del window
-
-# ! Temporary
-n, t, h, w, d =images.shape
-images.reshape((n * t), h, w, d).shape
-# ! ---------
 
 # Reads labels as sequences (20x20 tile subset)
 tile_size = (1, 1)
