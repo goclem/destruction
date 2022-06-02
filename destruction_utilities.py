@@ -107,6 +107,11 @@ def tile_sequences(images:np.ndarray, tile_size:tuple=(128, 128)) -> np.ndarray:
     sequence = sequence.reshape(-1, n_images, tile_width, tile_height, n_bands)
     return sequence
 
+def sample_split(images:np.ndarray, samples:dict) -> list:
+    '''Splits the data structure into multiple samples'''
+    samples = [images[samples == value, ...] for value in np.unique(samples)]
+    return samples
+
 #%% DISPLAY UTILITIES
     
 def display(image:np.ndarray, title:str='', cmap:str='gray') -> None:
