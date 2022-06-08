@@ -13,7 +13,7 @@
 import numpy as np
 from destruction_utilities import *
 
-# Fucntions
+# Functions
 
 # Reads images as sequences (20x20 tile subset)
 tile_size = (128, 128)
