@@ -209,17 +209,7 @@ def prep_all(city:str, suffix: str, datadir: str) -> None:
     prep_settlement(city, suffix, datadir)
     prep_noanalysis(city, suffix, datadir)
 
-# Helper to save zarr
-def save_zarr(data, type, suffix):
-    p, i, w, h, b = data.shape
-    print("Save ZARR:", type, suffix, data.shape)
-    data = data.reshape(p*i, h, w, b)
-    path = f'../data/{CITY}/others/{CITY}_{type}s_{suffix}.zarr'
-    if not exists(path):
-        zarr.save(path, data)        
-    else:
-        za = zarr.open(path, mode='a')
-        za.append(data)
+
 
 # Helper to get zarr file for a specified city, type (label or image), and set (test, train, validate)
 def get_zarr(city, type, set):
