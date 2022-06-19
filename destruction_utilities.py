@@ -20,6 +20,7 @@ import re
 from matplotlib import pyplot
 from rasterio import features, windows
 from tensorflow.keras import utils
+import zarr
 
 #%% FILE UTILITIES
 
@@ -207,3 +208,35 @@ def prep_all(city:str, suffix: str, datadir: str) -> None:
     prep_damage(city, suffix, datadir)
     prep_settlement(city, suffix, datadir)
     prep_noanalysis(city, suffix, datadir)
+
+# Helper to save zarr
+def save_zarr(data, type, suffix):
+    p, i, w, h, b = data.shape
+    print("Save ZARR:", type, suffix, data.shape)
+    data = data.reshape(p*i, h, w, b)
+    path = f'../data/{CITY}/others/{CITY}_{type}s_{suffix}.zarr'
+    if not exists(path):
+        zarr.save(path, data)        
+    else:
+        za = zarr.open(path, mode='a')
+        za.append(data)
+
+# Helper to get zarr file for a specified city, type (label or image), and set (test, train, validate)
+def get_zarr(city, type, set):
+    path = f'../data/{city}/others/{city}_{type}s_{set}.zarr'
+    return zarr.open(path)
+
+# Create tuple pairs for a given step size. used in balanced data generation
+# Input = make_tuple_pair(16433, 5000)
+# Output = [(0,5000), (5000, 10000), (10000,16433)] 
+def make_tuple_pair(n, step_size):
+    iters = n//step_size
+    l = []
+    for i in range(0, iters):
+        if i == iters - 1:
+            t = (i*step_size, n)
+            l.append(t)
+        else:
+            t = (i*step_size, (i+1)*step_size)
+            l.append(t)
+    return l

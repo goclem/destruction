@@ -18,11 +18,10 @@ from os.path import exists
 import zarr
 import gc
 
-
-from numpy import random
 from os import path
 from rasterio import features
 from destruction_utilities import *
+import random
 
 
 #%% 
@@ -38,16 +37,7 @@ def tiled_profile(source:str, tile_size:tuple=(128, 128, 1)) -> dict:
     profile.update(width=profile['width'] // tile_size[0], height=profile['height'] // tile_size[0], count=tile_size[2], transform=affine)
     return profile
 
-def save_zarr(data, type, suffix):
-    p, i, w, h, b = data.shape
-    print("Save ZARR:", type, suffix, data.shape)
-    data = data.reshape(p*i, h, w, b)
-    path = f'../data/{CITY}/others/{CITY}_{type}s_{suffix}.zarr'
-    if not exists(path):
-        zarr.save(path, data)        
-    else:
-        za = zarr.open(path, mode='a')
-        za.append(data)
+
 
 #%% 
 # DECLARATION
@@ -70,7 +60,7 @@ analysis   = np.logical_and(settlement, np.invert(noanalysis))
 del image, settlement, noanalysis
 
 # Splits samples
-random.seed(1)
+np.random.seed(1)
 index   = dict(training=0.70, validation=0.15, test=0.15)
 index   = np.random.choice(np.arange(len(index)) + 1, np.sum(analysis), p=list(index.values()))
 samples = analysis.astype(int)
@@ -119,36 +109,6 @@ samples = read_raster(f'../data/{CITY}/others/{CITY}_samples.tif')
 images  = search_data(pattern(city=CITY, type='image'))
 labels  = search_data(pattern(city=CITY, type='label'))
 
-# # Creates ZARR vectors for images
-# for i, image in enumerate(images):
-#     temp = np.array(read_raster(image))
-#     w, h, b = temp.shape
-#     temp = temp.reshape(1,w,h, b)
-#     temp = tile_sequences(temp,  tile_size=(128, 128))
-#     noanalysis, train, validate, test = sample_split(temp, samples.flatten())
-#     save_zarr(train, 'image', 'train')
-#     save_zarr(validate, 'image','validate')
-#     save_zarr(test, 'image','test')
-#     print(f'{dates[i]}')
-#     del noanalysis, train, validate, test
-
-# #%% 
-# # SAVE ND-ARRAYS (labels)
-
-# # Creates ZARR vectors for images
-# for i, label in enumerate(labels):
-#     temp = np.array(read_raster(label))
-#     w, h, b = temp.shape
-#     temp = temp.reshape(1,w,h, b)
-#     temp = tile_sequences(temp,  tile_size=(1, 1))
-#     noanalysis, train, validate, test = sample_split(temp, samples.flatten())
-#     save_zarr(train, 'label', 'train')
-#     save_zarr(validate, 'label','validate')
-#     save_zarr(test, 'label','test')
-#     print(f'{dates[i]}')
-#     del noanalysis, train, validate, test
-
-
 for i in range(len(images)):
     label = np.array(read_raster(labels[i]))
     w, h, b = label.shape
@@ -184,3 +144,39 @@ for i in range(len(images)):
     gc.collect(generation=2)
 
 # %%
+# Balanced Training Data Generation
+def make_balanced(city, set):
+    z_l = get_zarr(city, 'label', set)
+    z_i = get_zarr(city, 'image', set)
+    print(city, set)
+
+    path_l = f'../data/{city}/others/{city}_labels_{set}_balanced.zarr'
+    path_i = f'../data/{city}/others/{city}_images_{set}_balanced.zarr'
+
+    zarr.save(path_l, z_l)
+    zarr.save(path_i, z_i)
+
+    z_l_positives = np.where(np.squeeze(z_l) == 1)[0]
+    z_l_negatives = np.where(np.squeeze(z_l) == 0)[0]
+    sample_length = len(z_l_negatives) - len(z_l_positives)
+    indices = random.choices(z_l_positives, k=sample_length)
+
+    # del z_i, z_l
+
+    z_i_a = zarr.open(path_i, mode = 'a')
+    z_l_a = zarr.open(path_l, mode = 'a')
+    
+    step_size = 5000
+    for i, t in enumerate(make_tuple_pair(z_i.shape[0], step_size)):
+        sub_indices = [num for num in indices if num >= t[0] and num < t[1]]
+        sub_indices = list(map(lambda x: x-(i*step_size), sub_indices))
+        to_add_i = z_i[t[0]:t[1]][sub_indices]
+        to_add_l = z_l[t[0]:t[1]][sub_indices]
+        z_i_a.append(to_add_i)
+        z_l_a.append(to_add_l)
+        print(t, to_add_i.shape)
+
+    gc.collect()
+
+
+make_balanced(CITY, 'train')
