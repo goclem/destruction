@@ -209,10 +209,10 @@ def shuffle_balanced(city, set):
     for i, t in enumerate(tuple_pair):
         if i % 25 == 0:
             print(f"Finished {i} sets")
-        images = z_l[t[0]:t[1]]
-        labels = z_i[t[0]:t[1]]
-        z_l_s.append(images)
-        z_i_s.append(labels)
+        images = z_i[t[0]:t[1]]
+        labels = z_l[t[0]:t[1]]
+        z_l_s.append(labels)
+        z_i_s.append(images)
     shutil.rmtree(path_i)
     shutil.rmtree(path_l)
 
