@@ -21,11 +21,17 @@ import shutil
 from rasterio import features
 from destruction_utilities import *
 import random
+import time
 
+#%% 
+# DECLARATION
+CITY = 'aleppo'
+TILE_SIZE = (128,128)
+ZERO_DAMAGE_BEFORE_YEAR = 2012
 
 #%% 
 ## FUNCTIONS    
-def tiled_profile(source:str, tile_size:tuple=(128, 128, 1)) -> dict:
+def tiled_profile(source:str, tile_size:tuple=(*TILE_SIZE, 1)) -> dict:
     '''Computes raster profile for tiles'''
     raster  = rasterio.open(source)
     profile = raster.profile
@@ -48,9 +54,7 @@ def save_zarr(data, type, suffix):
         za = zarr.open(path, mode='a')
         za.append(data)
 
-#%% 
-# DECLARATION
-CITY = 'aleppo'
+
 
 #%% 
 # COMPUTES TILE SAMPLES
@@ -84,16 +88,21 @@ del index, samples, analysis
 # Reads damage reports
 damage = search_data(f'{CITY}_damage.*gpkg$')
 damage = geopandas.read_file(damage)
+last_annotation_date = sorted(damage.columns)[-2]
 
 # Extract report dates
 dates = search_data(pattern(city=CITY, type='image'))
 dates = extract(dates, '\d{4}_\d{2}_\d{2}')
 dates= list(map(lambda x: x.replace("_", "-"), dates))
 
-# # Fills missing dates (!) Discuss (!)
 
 damage[list(set(dates) - set(damage.columns))] = np.nan
 damage = damage.reindex(sorted(damage.columns), axis=1)
+pre_cols = [col for col in damage.drop('geometry', axis=1).columns if int(col.split("-")[0]) < ZERO_DAMAGE_BEFORE_YEAR]
+damage[pre_cols] = 0.0
+post_cols = [col for col in damage.drop('geometry', axis=1).columns if time.strptime(col, "%Y-%m-%d") > time.strptime(last_annotation_date, "%Y-%m-%d")]
+post_uncertain = list(*np.where(damage[last_annotation_date] == 0.0))
+damage.loc[post_uncertain,post_cols] = -1.0
 damage_geom = damage.geometry
 damage = damage.drop(columns='geometry')
 damage.insert(0,-1,0)
@@ -142,7 +151,7 @@ for i in range(len(images)):
     image = np.array(read_raster(images[i]))
     w,h,b = image.shape
     image = image.reshape(1,w,h,b)
-    image = tile_sequences(image,  tile_size=(128, 128))
+    image = tile_sequences(image,  tile_size=TILE_SIZE)
     image = np.delete(image, exclude, 0)
     noanalysis, train, validate, test = sample_split(image, np.delete(samples.flatten(), exclude))
     save_zarr(train[train_shuffle], 'image', 'train')
@@ -200,7 +209,7 @@ def shuffle_balanced(city, set):
     np.random.shuffle(tuple_pair)
     # print(tuple_pair)
 
-    zarr.save(path_i_s, np.empty((0,128,128,3)))
+    zarr.save(path_i_s, np.empty((0, *TILE_SIZE, 3)))
     zarr.save(path_l_s, np.empty((0,1,1,1)))
 
     z_i_s = zarr.open(path_i_s, mode='a')
@@ -218,7 +227,7 @@ def shuffle_balanced(city, set):
 
     del z_i_s, z_l_s, tuple_pair
 
-    zarr.save(path_i, np.empty((0,128,128,3)))
+    zarr.save(path_i, np.empty((0, *TILE_SIZE, 3)))
     zarr.save(path_l, np.empty((0,1,1,1)))
 
     z_i = zarr.open(path_i, mode='a')
