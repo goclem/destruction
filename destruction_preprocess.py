@@ -15,12 +15,9 @@ import geopandas
 import rasterio
 import re
 import zarr
-import gc
 import os
-import shutil
 from rasterio import features
 from destruction_utilities import *
-import random
 import time
 
 #%% 
@@ -66,7 +63,7 @@ noanalysis = search_data(f'{CITY}_noanalysis.*gpkg$')
 
 
 # Computes analysis zone
-profile    = tiled_profile(image, tile_size=(128, 128, 1))
+profile    = tiled_profile(image, tile_size=(*TILE_SIZE, 1))
 settlement = rasterise(settlement, profile, dtype='bool')
 noanalysis = rasterise(noanalysis, profile, dtype='bool')
 analysis   = np.logical_and(settlement, np.invert(noanalysis))
@@ -162,97 +159,8 @@ for i in range(len(images)):
     gc.collect(generation=2)
 
 # %%
-# GENERATE BALANCED DATA
-def make_balanced(city, set):
-    z_l = get_zarr(city, 'label', set)
-    z_i = get_zarr(city, 'image', set)
-    print(city, set)
-
-    path_l = f'../data/{city}/others/{city}_labels_{set}_balanced.zarr'
-    path_i = f'../data/{city}/others/{city}_images_{set}_balanced.zarr'
-
-    zarr.save(path_l, z_l)
-    zarr.save(path_i, z_i)
-
-    z_l_positives = np.where(np.squeeze(z_l) == 1)[0]
-    z_l_negatives = np.where(np.squeeze(z_l) == 0)[0]
-    sample_length = len(z_l_negatives) - len(z_l_positives)
-    indices = random.choices(z_l_positives, k=sample_length)
-
-    # del z_i, z_l
-
-    z_i_a = zarr.open(path_i, mode = 'a')
-    z_l_a = zarr.open(path_l, mode = 'a')
-    
-    step_size = 5000
-    for i, t in enumerate(make_tuple_pair(z_i.shape[0], step_size)):
-        sub_indices = [num for num in indices if num >= t[0] and num < t[1]]
-        sub_indices = list(map(lambda x: x-(i*step_size), sub_indices))
-        to_add_i = z_i[t[0]:t[1]][sub_indices]
-        to_add_l = z_l[t[0]:t[1]][sub_indices]
-        z_i_a.append(to_add_i)
-        z_l_a.append(to_add_l)
-        print(t, to_add_i.shape)
-
-    gc.collect()
-
-def shuffle_balanced(city, set):
-    path_l = f'../data/{city}/others/{city}_labels_{set}_balanced.zarr'
-    path_i = f'../data/{city}/others/{city}_images_{set}_balanced.zarr'
-    path_l_s = f'../data/{city}/others/{city}_labels_{set}_balanced_shuffled.zarr'
-    path_i_s = f'../data/{city}/others/{city}_images_{set}_balanced_shuffled.zarr'
-    
-    z_l = zarr.open(path_l)
-    z_i = zarr.open(path_i)
-    n = z_l.shape[0]
-    tuple_pair = make_tuple_pair(n, 250)
-    np.random.shuffle(tuple_pair)
-    # print(tuple_pair)
-
-    zarr.save(path_i_s, np.empty((0, *TILE_SIZE, 3)))
-    zarr.save(path_l_s, np.empty((0,1,1,1)))
-
-    z_i_s = zarr.open(path_i_s, mode='a')
-    z_l_s = zarr.open(path_l_s, mode='a')
-    print(f"Reordering array in batches of 250. Total {len(tuple_pair)} sets..")
-    for i, t in enumerate(tuple_pair):
-        if i % 25 == 0:
-            print(f"Finished {i} sets")
-        images = z_i[t[0]:t[1]]
-        labels = z_l[t[0]:t[1]]
-        z_l_s.append(labels)
-        z_i_s.append(images)
-    shutil.rmtree(path_i)
-    shutil.rmtree(path_l)
-
-    del z_i_s, z_l_s, tuple_pair
-
-    zarr.save(path_i, np.empty((0, *TILE_SIZE, 3)))
-    zarr.save(path_l, np.empty((0,1,1,1)))
-
-    z_i = zarr.open(path_i, mode='a')
-    z_l = zarr.open(path_l, mode='a')
-    z_i_s = zarr.open(path_i_s)
-    z_l_s = zarr.open(path_l_s)
-    tuple_pair = make_tuple_pair(n, 10000)
-    print(f"Shuffling array in batches of 10000. Total {len(tuple_pair)} sets..")
-    for i, t in enumerate(tuple_pair):
-        if i % 5 == 0:
-            print(f"Finished {i} sets")
-        shuffled = np.arange(0, 10000)
-        np.random.shuffle(shuffled)
-        images = z_i_s[t[0]:t[1]][shuffled]
-        labels = z_l_s[t[0]:t[1]][shuffled]
-        z_i.append(images)
-        z_l.append(labels)
-    shutil.rmtree(path_i_s)
-    shutil.rmtree(path_l_s)
-
-
-
-
-       
+# GENERATE BALANCED DATA       
 make_balanced(CITY, 'train')
-shuffle_balanced(CITY, 'train')
- 
+shuffle_balanced(CITY, 'train', TILE_SIZE, 1000, 5000)
+
 # %%
