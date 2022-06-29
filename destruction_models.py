@@ -55,8 +55,8 @@ def encoder_block_shared(shape:tuple, filters:int=1, dropout=0):
 
 def siamese_convolutional_network(shape:tuple, args_encode:dict, args_dense:dict):
     # Input layers
-    images1 = layers.Input(shape=shape, name='images1')
-    images2 = layers.Input(shape=shape, name='images2')
+    images1 = layers.Input(shape=shape, name='images_t0')
+    images2 = layers.Input(shape=shape, name='images_tt')
     # Hidden convolutional layers (shared parameters)
     encoder_block = encoder_block_shared(shape=shape, **args_encode)
     encode1 = encoder_block(images1)
@@ -66,10 +66,8 @@ def siamese_convolutional_network(shape:tuple, args_encode:dict, args_dense:dict
     dense   = dense_block(concat, **args_dense, name='dense_block1')
     dense   = dense_block(dense,  **args_dense, name='dense_block2')
     dense   = dense_block(dense,  **args_dense, name='dense_block3')
-    dense   = dense_block(dense,  **args_dense, name='dense_block4')
-    dense   = dense_block(dense,  **args_dense, name='dense_block5')
     # Output layer
-    outputs = layers.Dense(units=1, activation='tanh', name='outputs')(dense)
+    outputs = layers.Dense(units=1, activation='sigmoid', name='outputs')(dense)
     # Model
     model   = models.Model(inputs=[images1, images2], outputs=outputs, name='siamese_convolutional_network')
     return model
