@@ -7,13 +7,14 @@
 @version: 2022.05.11
 '''
 
-#%% FORMATS DATA AS SEQUENCES
-
 # Modules
 import numpy as np
-from destruction_utilities import *
+import destruction_models as models
 
-# Functions
+from destruction_utilities import *
+from keras import callbacks, metrics
+
+#%% LOADS DATA
 
 # Reads images as sequences (20x20 tile subset)
 tile_size = (128, 128)
@@ -39,29 +40,39 @@ samples = read_raster(samples, window=window, dtype='int8')
 samples = samples.flatten()
 del window
 
+#%% RESHAPES DATA FOR SIAMESE MODEL
+
+def reshape_siamese(images):
+    n, t, h, w, d = images.shape
+    images_t0 = np.tile(np.take(images, [0], 1), (1, t-1, 1, 1, 1)).reshape(n * (t-1), h, w, d)
+    images_tt = np.delete(images, 0, 1).reshape(n * (t-1), h, w, d)
+    return images_t0, images_tt
+
 # Split samples
 _, images_train, images_test, images_valid = sample_split(images, samples)
 _, labels_train, labels_test, labels_valid = sample_split(labels, samples)
 del _
 
-# Reshape images and labels for networks structures
-n, t, h, w, d = images_train.shape
-images_convolutional = images_train.reshape(n*t, h, w, d)
-images_siamese1 = images_train[:, :-1, ...].reshape(n*(t-1), h, w, d)
-images_siamese2 = images_train[:,  1:, ...].reshape(n*(t-1), h, w, d)
-labels_siamese1 = labels_train[:, :-1, ...].reshape(n*(t-1))
-labels_siamese2 = labels_train[:,  1:, ...].reshape(n*(t-1))
-labels_simaese  = np.invert(np.equal(labels_siamese1, labels_siamese2))
+images_train_t0, images_train_tt = reshape_siamese(images_train)
+images_valid_t0, images_valid_tt = reshape_siamese(images_valid)
+labels_train = np.delete(labels_train, 0, 1).flatten()
+labels_valid = np.delete(labels_valid, 0, 1).flatten()
 
-#%% Checks sequences
-def check_sequence(i:int, span:int=2):
-    change = int(np.where(np.diff(labels_simaese[i]))[0]) + 1
-    index  = (change - span, change + span)
-    label  = labels[i][index[0]:index[1]]
-    image  = images[i][index[0]:index[1]]
-    date   = dates[index[0]:index[1]]
-    caption = [f'{d}: {l}' for d, l in zip(date, label)]
-    compare(image, caption)
+#%% ESTIMATES SIAMESE MODEL
+
+# Model structure
+model = models.siamese_convolutional_network(shape=(128, 128, 3), args_encode=dict(filters=8, dropout=0), args_dense=dict(units=16, dropout=0))
+model.compile(optimizer='adam', loss='binary_focal_crossentropy', metrics=metrics.AUC(num_thresholds=200, curve='ROC'))
+model.summary()
+
+# Estimates parameters
+training = model.fit(    
+    {'images_t0':images_train_t0, 'images_tt':images_train_tt}, 
+    y=labels_train,
+    epochs=100,
+    verbose=1,
+    callbacks=callbacks.EarlyStopping(monitor='val_auc', patience=5, restore_best_weights=True)
+)
 
 #%% SEQUENCE GENERATOR
 
@@ -87,3 +98,14 @@ sequence = np.tile(sequence, 9).reshape(3, 3, len(sequence))
 # Sequences
 sequence = sequence.reshape(3 * 3, 6)
 sequence = np.apply_along_axis(generate_sequences, 1, sequence)
+
+# Checks sequence
+
+def check_sequence(i:int, span:int=2):
+    change = int(np.where(np.diff(labels_simaese[i]))[0]) + 1
+    index  = (change - span, change + span)
+    label  = labels[i][index[0]:index[1]]
+    image  = images[i][index[0]:index[1]]
+    date   = dates[index[0]:index[1]]
+    caption = [f'{d}: {l}' for d, l in zip(date, label)]
+    compare(image, caption)

@@ -21,21 +21,6 @@ from matplotlib import pyplot
 from keras import callbacks, preprocessing
 from os import path
 
-#%% FUNCTIONS
-
-def display_history(history:dict, stats:list=['accuracy', 'loss']) -> None:
-    '''Displays model training history'''
-    fig, axs = pyplot.subplots(nrows=1, ncols=2, figsize=(10, 5))
-    for ax, stat in zip(axs.ravel(), stats):
-        ax.plot(history[stat])
-        ax.plot(history[f'val_{stat}'])
-        ax.set_title(f'Training {stat}', fontsize=15)
-        ax.set_ylabel('Accuracy')
-        ax.set_xlabel('Epoch')
-        ax.legend(['Training sample', 'Validation sample'], frameon=False)
-    pyplot.tight_layout(pad=2.0)
-    pyplot.show()
-
 #%% READS DATA
 
 # Reads images (subset)
