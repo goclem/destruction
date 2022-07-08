@@ -10,7 +10,7 @@
 #%% HEADER
 
 # We load required packages..
-print('We load required packages..')
+print('\n--- We load required packages..')
 import numpy as np
 import geopandas
 import rasterio
@@ -24,7 +24,7 @@ import shutil
 
 #%% 
 # Declare variables..
-print('Declare variables..')
+print('\n--- Declare variables..')
 
 CITY = 'aleppo'
 TILE_SIZE = (128,128)
@@ -37,7 +37,7 @@ PRE_IMG_INDEX = 0
 
 #%% 
 ## Declare functions..  
-print('Declare functions..')
+print('\n--- Declare functions..')
 def tiled_profile(source:str, tile_size:tuple=(*TILE_SIZE, 1)) -> dict:
     '''Computes raster profile for tiles'''
     raster  = rasterio.open(source)
@@ -51,7 +51,7 @@ def tiled_profile(source:str, tile_size:tuple=(*TILE_SIZE, 1)) -> dict:
 
 #%% 
 # Split tiles into train, test, and validate..
-print('Split tiles into train, test, and validate..')
+print('\n--- Split tiles into train, test, and validate..')
 
 image      = search_data(pattern(city=CITY, type='image'))[0]
 settlement = search_data(f'{CITY}_settlement.*gpkg$')
@@ -75,7 +75,7 @@ del index, samples, analysis
 
 #%% 
 # Calculate labels for each tile..
-print('Calculate labels for each tile..')
+print('\n--- Calculate labels for each tile..')
 # Reads damage reports
 damage = search_data(f'{CITY}_damage.*gpkg$')
 damage = geopandas.read_file(damage)
@@ -106,7 +106,7 @@ damage = damage[dates + ['geometry']] # Drops dates not in images
 
 # Writes damage labels
 for date in dates:
-    print(f'\t{date}')
+    print(f'------ {date}')
     subset = damage[[date, 'geometry']].sort_values(by=date) # Sorting takes the max per pixel
     subset = rasterise(subset, profile, date)
     write_raster(subset, profile, f'../data/{CITY}/labels/label_{date}.tif', nodata=-1, dtype='int8')
@@ -114,7 +114,7 @@ del date, subset
 
 #%% 
 # Save images to disk as zarr (for CNN)..
-print('Save images to disk as zarr (for CNN)..')
+print('\n--- Save images to disk as zarr (for CNN)..')
 
 # SAVE ND-ARRAYS (images)
 samples = read_raster(f'../data/{CITY}/others/{CITY}_samples.tif')
@@ -159,13 +159,13 @@ for i in range(len(images)):
     save_zarr(validate[validate_shuffle].reshape(np.take(validate.shape, [0,2,3,4])), CITY,'images_conv_valid')
     save_zarr(test[test_shuffle].reshape(np.take(test.shape, [0,2,3,4])), CITY,'images_conv_test') 
     del _, train, validate, test, image, exclude
-    print(f'\t{dates[i]}')
+    print(f'------ {dates[i]}')
     gc.collect(generation=2)
 del samples, images, labels
 
 #%% 
 # Generate a balanced (upsampled) dataset and shuffle it..
-print('Generate a balanced (upsampled) dataset and shuffle it..')
+print('\n--- Generate a balanced (upsampled) dataset and shuffle it..')
 delete_zarr_if_exists(CITY, 'labels_conv_train_balanced')
 delete_zarr_if_exists(CITY, 'images_conv_train_balanced')
 delete_zarr_if_exists(CITY, 'labels_conv_train_balanced_shuffled')
@@ -175,7 +175,7 @@ shuffle(CITY, TILE_SIZE, (1000,7500))
 
 #%% 
 # Save images to disk as zarr (for SNN)..
-print('Save images to disk as zarr (for SNN)..')
+print('\n--- Save images to disk as zarr (for SNN)..')
 samples = search_data(f'{CITY}_samples.tif$')
 samples = read_raster(samples, dtype='int8')
 samples = samples.flatten()
