@@ -106,7 +106,7 @@ damage = damage[dates + ['geometry']] # Drops dates not in images
 
 # Writes damage labels
 for date in dates:
-    print(date)
+    print(f'\t{date}')
     subset = damage[[date, 'geometry']].sort_values(by=date) # Sorting takes the max per pixel
     subset = rasterise(subset, profile, date)
     write_raster(subset, profile, f'../data/{CITY}/labels/label_{date}.tif', nodata=-1, dtype='int8')
@@ -159,7 +159,7 @@ for i in range(len(images)):
     save_zarr(validate[validate_shuffle].reshape(np.take(validate.shape, [0,2,3,4])), CITY,'images_conv_valid')
     save_zarr(test[test_shuffle].reshape(np.take(test.shape, [0,2,3,4])), CITY,'images_conv_test') 
     del _, train, validate, test, image, exclude
-    print(f'{dates[i]}')
+    print(f'\t{dates[i]}')
     gc.collect(generation=2)
 del samples, images, labels
 

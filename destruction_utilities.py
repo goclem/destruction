@@ -314,11 +314,11 @@ def shuffle(city, tile_size, batch_sizes, path="../data"):
 
     z_l_s = zarr.open(path_l_s, mode='a')
     z_i_s = zarr.open(path_i_s, mode='a')
-    print(f"Reordering array in batches of {first}. Total {len(tuple_pair)} sets..")
+    print(f"\tReordering array in batches of {first}. Total {len(tuple_pair)} sets..")
     
     for i, t in enumerate(tuple_pair):
         if i % 50 == 0 and i != 0:
-            print(f"Finished {i} sets")
+            print(f"\t\tFinished {i} sets")
         labels = z_l[t[0]:t[1]]
         images = z_i[t[0]:t[1]]
         z_l_s.append(labels)
@@ -337,10 +337,10 @@ def shuffle(city, tile_size, batch_sizes, path="../data"):
     z_l_s = zarr.open(path_l_s)
     z_i_s = zarr.open(path_i_s)
     tuple_pair = make_tuple_pair(n, second)
-    print(f"Shuffling array in batches of {second}. Total {len(tuple_pair)} sets..")
+    print(f"\tShuffling array in batches of {second}. Total {len(tuple_pair)} sets..")
     for i, t in enumerate(tuple_pair):
         if i % 15 == 0 and i != 0:
-            print(f"Finished {i} sets")
+            print(f"\t\tFinished {i} sets")
         shuffled = np.arange(0, t[1]-t[0])
         np.random.shuffle(shuffled)
         np.random.shuffle(shuffled)
