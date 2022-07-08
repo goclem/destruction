@@ -10,6 +10,7 @@
 #%% HEADER
 
 # We load required packages..
+print('We load required packages..')
 import numpy as np
 import geopandas
 import rasterio
@@ -23,6 +24,8 @@ import shutil
 
 #%% 
 # Declare variables..
+print('Declare variables..')
+
 CITY = 'aleppo'
 TILE_SIZE = (128,128)
 
@@ -34,6 +37,7 @@ PRE_IMG_INDEX = 0
 
 #%% 
 ## Declare functions..  
+print('Declare functions..')
 def tiled_profile(source:str, tile_size:tuple=(*TILE_SIZE, 1)) -> dict:
     '''Computes raster profile for tiles'''
     raster  = rasterio.open(source)
@@ -47,6 +51,7 @@ def tiled_profile(source:str, tile_size:tuple=(*TILE_SIZE, 1)) -> dict:
 
 #%% 
 # Split tiles into train, test, and validate..
+print('Split tiles into train, test, and validate..')
 
 image      = search_data(pattern(city=CITY, type='image'))[0]
 settlement = search_data(f'{CITY}_settlement.*gpkg$')
@@ -70,7 +75,7 @@ del index, samples, analysis
 
 #%% 
 # Calculate labels for each tile..
-
+print('Calculate labels for each tile..')
 # Reads damage reports
 damage = search_data(f'{CITY}_damage.*gpkg$')
 damage = geopandas.read_file(damage)
@@ -109,6 +114,7 @@ del date, subset
 
 #%% 
 # Save images to disk as zarr (for CNN)..
+print('Save images to disk as zarr (for CNN)..')
 
 # SAVE ND-ARRAYS (images)
 samples = read_raster(f'../data/{CITY}/others/{CITY}_samples.tif')
@@ -159,6 +165,7 @@ del samples, images, labels
 
 #%% 
 # Generate a balanced (upsampled) dataset and shuffle it..
+print('Generate a balanced (upsampled) dataset and shuffle it..')
 delete_zarr_if_exists(CITY, 'labels_conv_train_balanced')
 delete_zarr_if_exists(CITY, 'images_conv_train_balanced')
 delete_zarr_if_exists(CITY, 'labels_conv_train_balanced_shuffled')
@@ -168,6 +175,7 @@ shuffle(CITY, TILE_SIZE, (1000,7500))
 
 #%% 
 # Save images to disk as zarr (for SNN)..
+print('Save images to disk as zarr (for SNN)..')
 samples = search_data(f'{CITY}_samples.tif$')
 samples = read_raster(samples, dtype='int8')
 samples = samples.flatten()
