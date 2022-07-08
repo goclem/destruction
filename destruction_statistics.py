@@ -15,6 +15,8 @@ from destruction_utilities import *
 
 #%% FUNCTIONS
 
+# ! Update for patches
+
 # Computes prediction sets
 def compute_sets(label:np.ndarray, predict:np.ndarray) -> np.ndarray:
     # Formats labels

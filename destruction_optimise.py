@@ -18,7 +18,7 @@ import destruction_models as models
 from destruction_utilities import *
 from numpy import random
 from matplotlib import pyplot
-from tensorflow.keras import callbacks, preprocessing
+from keras import callbacks, preprocessing
 from os import path
 
 #%% FUNCTIONS
@@ -41,12 +41,12 @@ def display_history(history:dict, stats:list=['accuracy', 'loss']) -> None:
 # Reads images (subset)
 images = search_data(pattern(city='aleppo', type='image'))[-1:]
 images = np.array(list(map(read_raster, images)))
-images = images_to_tiles(images, tile_size=(128, 128))
+images = tile_sequences(images, tile_size=(128, 128))
 
 # Reads labels (subset)
 labels = search_data(pattern(city='aleppo', type='label'))[-1:]
 labels = np.array(list(map(read_raster, labels)))
-labels = utils.images_to_tiles(labels, tile_size=(1, 1))
+labels = tile_sequences(labels, tile_size=(1, 1))
 labels = np.squeeze(labels, axis=(2, 3)).astype(float)
 
 # Samples tiles (temporary)
@@ -78,7 +78,7 @@ augmentation = dict(
     rescale=1./255,
     horizontal_flip=True, 
     vertical_flip=True,
-    rotation_range=15, 
+    rotation_range=10, 
     width_shift_range=0.1,
     height_shift_range=0.1,
     brightness_range=[0.9,1.1],
@@ -94,10 +94,11 @@ train_generator = train_generator.flow(images_train, labels_train, batch_size=32
 #%% MODELS
 
 # Initialises model
-args  = dict(shape=(64, 64, 3), filters=16, units=32, dropout=0.1)
+args  = dict(shape=(128, 128, 3), filters=16, units=32, dropout=0.1) # ! Check parameters before run
 model = models.convolutional_network(**args)
 model.compile(optimizer='adam', loss='binary_focal_crossentropy', metrics='accuracy')
-# display_structure(model, '../models/convolutional_network')
+# display_structure(model, path.join(paths['models'], 'convolutional_network.html'))
+
 
 #%% OPTIMISATION
 
@@ -118,8 +119,8 @@ training = model.fit(
 )
 
 # Saves estimated model
-# models.save_model(model, 'siamese_convolutional_network.h5')
-# np.save('siamese_convolutional_network.npy', training.history)
+# models.save_model(model, path.join(paths['models'], 'convolutional_network.h5'))
+# np.save(path.join(paths['models'], 'convolutional_history.h5'), training.history)
 
 #%% CHECKS
 
