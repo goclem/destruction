@@ -176,8 +176,7 @@ shuffle(CITY, TILE_SIZE, (1000,7500))
 #%% 
 # Save images to disk as zarr (for SNN)..
 print('\n--- Save images to disk as zarr (for SNN)..')
-samples = search_data(f'{CITY}_samples.tif$')
-samples = read_raster(samples, dtype='int8')
+samples = read_raster(f'../data/{CITY}/others/{CITY}_samples.tif')
 samples = samples.flatten()
 
 images  = search_data(pattern('aleppo', 'image'))
