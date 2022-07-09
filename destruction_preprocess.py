@@ -26,7 +26,7 @@ import shutil
 # Declare variables..
 print('--- Declare variables..')
 
-CITY = 'aleppo'
+CITY = 'deir-ez-zor'
 TILE_SIZE = (128,128)
 
 # Convolutional Network Settings
@@ -179,7 +179,7 @@ print('--- Save images to disk as zarr (for SNN)..')
 samples = read_raster(f'../data/{CITY}/others/{CITY}_samples.tif')
 samples = samples.flatten()
 
-images  = search_data(pattern('aleppo', 'image'))
+images  = search_data(pattern(CITY, 'image'))
 
 delete_zarr_if_exists(CITY, 'images_siamese_train_tt')
 delete_zarr_if_exists(CITY, 'images_siamese_test_tt')
@@ -212,7 +212,7 @@ delete_zarr_if_exists(CITY, 'labels_siamese_train')
 delete_zarr_if_exists(CITY, 'labels_siamese_test')
 delete_zarr_if_exists(CITY, 'labels_siamese_valid')
 
-labels  = search_data(pattern('aleppo', 'label'))
+labels  = search_data(pattern(CITY, 'label'))
 for i, label in enumerate(labels):
     t = len(labels)
     if i != PRE_IMG_INDEX:
