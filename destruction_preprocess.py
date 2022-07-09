@@ -165,7 +165,7 @@ del samples, images, labels
 
 #%% 
 # Generate a balanced (upsampled) dataset and shuffle it..
-print('\n--- Generate a balanced (upsampled) dataset and shuffle it..')
+print('--- Generate a balanced (upsampled) dataset and shuffle it..')
 delete_zarr_if_exists(CITY, 'labels_conv_train_balanced')
 delete_zarr_if_exists(CITY, 'images_conv_train_balanced')
 delete_zarr_if_exists(CITY, 'labels_conv_train_balanced_shuffled')
@@ -175,7 +175,7 @@ shuffle(CITY, TILE_SIZE, (1000,7500))
 
 #%% 
 # Save images to disk as zarr (for SNN)..
-print('\n--- Save images to disk as zarr (for SNN)..')
+print('--- Save images to disk as zarr (for SNN)..')
 samples = read_raster(f'../data/{CITY}/others/{CITY}_samples.tif')
 samples = samples.flatten()
 

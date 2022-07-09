@@ -8,7 +8,7 @@
 '''
 
 # Modules
-from keras import layers, models
+from tensorflow.keras import layers, models
 
 def dense_block(inputs, units:int=1, dropout:float=0, name:str=''):
     dense         = layers.Dense(units=units, activation='relu', use_bias=False, kernel_initializer='he_normal', name=f'{name}_dense')(inputs)
