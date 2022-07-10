@@ -236,5 +236,6 @@ if MODE == 'all' or MODE == 'snn':
             save_zarr(flatten_image(pre_image_train), CITY, 'images_siamese_train_t0')
             save_zarr(flatten_image(pre_image_test), CITY, 'images_siamese_test_t0')
             save_zarr(flatten_image(pre_image_valid), CITY, 'images_siamese_valid_t0')
+            print(f'--- {i+1} of {len(images)} done..')
 
 print('--- Process complete.. \n')
