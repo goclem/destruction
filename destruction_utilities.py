@@ -354,3 +354,39 @@ def shuffle(city, tile_size, batch_sizes, path="../data"):
 
 
 
+def balance_snn(city, path="../data"):
+    z_l = read_zarr(city, 'labels_siamese_train')
+    z_i_t0 = read_zarr(city, 'images_siamese_train_t0')
+    z_i_tt = read_zarr(city, 'images_siamese_train_tt')
+
+    path_l = f'{path}/{city}/others/{city}_labels_siamese_train_balanced.zarr'
+    path_i_t0 = f'{path}/{city}/others/{city}_images_siamese_train_t0_balanced.zarr'
+    path_i_tt = f'{path}/{city}/others/{city}_images_siamese_train_tt_balanced.zarr'
+
+
+    zarr.save(path_l, z_l)
+    zarr.save(path_i_t0, z_i_t0)
+    zarr.save(path_i_tt, z_i_tt)
+
+    z_l_positives = np.where(np.squeeze(z_l) == 1)[0]
+    z_l_negatives = np.where(np.squeeze(z_l) == 0)[0]
+    sample_length = len(z_l_negatives) - len(z_l_positives)
+    indices = random.choices(z_l_positives, k=sample_length)
+
+    z_l_a = zarr.open(path_l, mode = 'a')
+    z_i_t0_a = zarr.open(path_i_t0, mode = 'a')
+    z_i_tt_a = zarr.open(path_i_tt, mode = 'a')
+    
+    step_size = 5000
+    for i, t in enumerate(make_tuple_pair(z_i_t0.shape[0], step_size)):
+        sub_indices = [num for num in indices if num >= t[0] and num < t[1]]
+        sub_indices = list(map(lambda x: x-(i*step_size), sub_indices))
+        to_add_l = z_l[t[0]:t[1]][sub_indices]
+        to_add_i_t0 = z_i_t0[t[0]:t[1]][sub_indices]
+        to_add_i_tt = z_i_tt[t[0]:t[1]][sub_indices]
+        z_l_a.append(to_add_l)
+        z_i_t0_a.append(to_add_i_t0)
+        z_i_tt_a.append(to_add_i_tt)
+
+    gc.collect(generation=2)
+    
