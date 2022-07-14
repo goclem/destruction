@@ -24,6 +24,7 @@ import zarr
 import gc
 
 import random
+from tensorflow.keras.metrics import CategoricalAccuracy, Precision, AUC
 
 import shutil
 
@@ -391,4 +392,28 @@ def balance_snn(city, path="../data"):
         z_i_tt_a.append(to_add_i_tt)
 
     gc.collect(generation=2)
+    
+    
+def recall_m(y_true, y_pred):
+    true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
+    possible_positives = K.sum(K.round(K.clip(y_true, 0, 1)))
+    recall = true_positives / (possible_positives + K.epsilon())
+    return recall
+
+def precision_m(y_true, y_pred):
+    true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
+    predicted_positives = K.sum(K.round(K.clip(y_pred, 0, 1)))
+    precision = true_positives / (predicted_positives + K.epsilon())
+    return precision
+
+def f1_m(y_true, y_pred):
+    precision = precision_m(y_true, y_pred)
+    recall = recall_m(y_true, y_pred)
+    return 2*((precision*recall)/(precision+recall+K.epsilon()))
+
+auc = AUC(
+    num_thresholds=200,
+    curve='ROC',
+)
+    
     
