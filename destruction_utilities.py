@@ -27,6 +27,8 @@ import random
 
 import shutil
 
+TILE_SIZE = [128,128]
+
 #%% FILE UTILITIES
 
 def search_data(pattern:str='.*', directory:str='../data') -> list:

@@ -7,6 +7,7 @@
 @version: 2022.06.02
 '''
 
+#%% 
 # CLI
 import argparse
 parser = argparse.ArgumentParser()
@@ -17,7 +18,7 @@ args = parser.parse_args()
 
 #%% 
 # We declare parameters..
-CITY = 'deir-ez-zor'
+CITY = 'test'
 TILE_SIZE = (128,128)
 MODE = 'all'
 
@@ -26,6 +27,7 @@ ZERO_DAMAGE_BEFORE_YEAR = 2012
 # SNN Settings
 PRE_IMG_INDEX = 0
 
+#%%
 if args.city:
     CITY = args.city
 
@@ -63,70 +65,71 @@ def tiled_profile(source:str, tile_size:tuple=(*TILE_SIZE, 1)) -> dict:
     profile.update(width=profile['width'] // tile_size[0], height=profile['height'] // tile_size[0], count=tile_size[2], transform=affine)
     return profile
 
-if MODE == 'all' or MODE == 'cnn':
-    #%% 
-    # Split tiles into train, test, and validate..
-    print('--- Split tiles into train, test, and validate..')
 
-    image      = search_data(pattern(city=CITY, type='image'))[0]
-    settlement = search_data(f'{CITY}_settlement.*gpkg$')
-    noanalysis = search_data(f'{CITY}_noanalysis.*gpkg$')
+#%% 
+# Split tiles into train, test, and validate..
+print('--- Split tiles into train, test, and validate..')
 
-    # Computes analysis zone
-    profile    = tiled_profile(image, tile_size=(*TILE_SIZE, 1))
-    settlement = rasterise(settlement, profile, dtype='bool')
-    noanalysis = rasterise(noanalysis, profile, dtype='bool')
-    analysis   = np.logical_and(settlement, np.invert(noanalysis))
-    del image, settlement, noanalysis
+image      = search_data(pattern(city=CITY, type='image'))[0]
+settlement = search_data(f'{CITY}_settlement.*gpkg$')
+noanalysis = search_data(f'{CITY}_noanalysis.*gpkg$')
 
-    # Splits samples
-    np.random.seed(1)
-    index   = dict(training=0.70, validation=0.15, test=0.15)
-    index   = np.random.choice(np.arange(len(index)) + 1, np.sum(analysis), p=list(index.values()))
-    samples = analysis.astype(int)
-    np.place(samples, analysis, index)
-    write_raster(samples, profile, f'../data/{CITY}/others/{CITY}_samples.tif', nodata=-1, dtype='int8')
-    del index, samples, analysis
+# Computes analysis zone
+profile    = tiled_profile(image, tile_size=(*TILE_SIZE, 1))
+settlement = rasterise(settlement, profile, dtype='bool')
+noanalysis = rasterise(noanalysis, profile, dtype='bool')
+analysis   = np.logical_and(settlement, np.invert(noanalysis))
+del image, settlement, noanalysis
 
-    #%% 
-    # Calculate labels for each tile..
-    print('--- Calculate labels for each tile..')
-    # Reads damage reports
-    damage = search_data(f'{CITY}_damage.*gpkg$')
-    damage = geopandas.read_file(damage)
-    last_annotation_date = sorted(damage.columns)[-2]
+# Splits samples
+np.random.seed(1)
+index   = dict(training=0.70, validation=0.15, test=0.15)
+index   = np.random.choice(np.arange(len(index)) + 1, np.sum(analysis), p=list(index.values()))
+samples = analysis.astype(int)
+np.place(samples, analysis, index)
+write_raster(samples, profile, f'../data/{CITY}/others/{CITY}_samples.tif', nodata=-1, dtype='int8')
+del index, samples, analysis
 
-    # Extract report dates
-    dates = search_data(pattern(city=CITY, type='image'))
-    dates = extract(dates, '\d{4}_\d{2}_\d{2}')
-    dates= list(map(lambda x: x.replace("_", "-"), dates))
+# Calculate labels for each tile..
+print('--- Calculate labels for each tile..')
+# Reads damage reports
+damage = search_data(f'{CITY}_damage.*gpkg$')
+damage = geopandas.read_file(damage)
+last_annotation_date = sorted(damage.columns)[-2]
 
-    # Forward and back-filling based on annotation, mapping and dropping uncertain (-1) class tiles
-    damage[list(set(dates) - set(damage.columns))] = np.nan
-    damage = damage.reindex(sorted(damage.columns), axis=1)
-    pre_cols = [col for col in damage.drop('geometry', axis=1).columns if int(col.split("-")[0]) < ZERO_DAMAGE_BEFORE_YEAR]
-    damage[pre_cols] = 0.0
-    post_cols = [col for col in damage.drop('geometry', axis=1).columns if time.strptime(col, "%Y-%m-%d") > time.strptime(last_annotation_date, "%Y-%m-%d")]
-    post_uncertain = list(*np.where(damage[last_annotation_date] == 0.0))
-    damage.loc[post_uncertain,post_cols] = -1.0
-    damage_geom = damage.geometry
-    damage = damage.drop(columns='geometry')
-    damage.insert(0,-1,0)
-    damage['9999'] = damage[damage.T.last_valid_index()]
-    values = damage.T.fillna(method='ffill').fillna(method='bfill')
-    temp = damage.T.fillna(method='bfill').fillna(method='ffill')
-    values[values != temp] = -1
-    damage = geopandas.GeoDataFrame(values.T.drop([-1, '9999'], axis=1), geometry=damage_geom)
-    damage = damage[dates + ['geometry']] # Drops dates not in images
+# Extract report dates
+dates = search_data(pattern(city=CITY, type='image'))
+dates = extract(dates, '\d{4}_\d{2}_\d{2}')
+dates= list(map(lambda x: x.replace("_", "-"), dates))
 
-    # Writes damage labels
-    for date in dates:
-        print(f'------ {date}')
-        subset = damage[[date, 'geometry']].sort_values(by=date) # Sorting takes the max per pixel
-        subset = rasterise(subset, profile, date)
-        write_raster(subset, profile, f'../data/{CITY}/labels/label_{date}.tif', nodata=-1, dtype='int8')
-    del date, subset
+# Forward and back-filling based on annotation, mapping and dropping uncertain (-1) class tiles
+damage[list(set(dates) - set(damage.columns))] = np.nan
+damage = damage.reindex(sorted(damage.columns), axis=1)
+pre_cols = [col for col in damage.drop('geometry', axis=1).columns if int(col.split("-")[0]) < ZERO_DAMAGE_BEFORE_YEAR]
+damage[pre_cols] = 0.0
+post_cols = [col for col in damage.drop('geometry', axis=1).columns if time.strptime(col, "%Y-%m-%d") > time.strptime(last_annotation_date, "%Y-%m-%d")]
+post_uncertain = list(*np.where(damage[last_annotation_date] == 0.0))
+damage.loc[post_uncertain,post_cols] = -1.0
+damage_geom = damage.geometry
+damage = damage.drop(columns='geometry')
+damage.insert(0,-1,0)
+damage['9999'] = damage[damage.T.last_valid_index()]
+values = damage.T.fillna(method='ffill').fillna(method='bfill')
+temp = damage.T.fillna(method='bfill').fillna(method='ffill')
+values[values != temp] = -1
+damage = geopandas.GeoDataFrame(values.T.drop([-1, '9999'], axis=1), geometry=damage_geom)
+damage = damage[dates + ['geometry']] # Drops dates not in images
 
+# Writes damage labels
+for date in dates:
+    print(f'------ {date}')
+    subset = damage[[date, 'geometry']].sort_values(by=date) # Sorting takes the max per pixel
+    subset = rasterise(subset, profile, date)
+    write_raster(subset, profile, f'../data/{CITY}/labels/label_{date}.tif', nodata=-1, dtype='int8')
+del date, subset
+
+#%% 
+if  MODE == 'cnn' or MODE=='all':
     #%% 
     # Save images to disk as zarr (for CNN)..
     print('--- Save images to disk as zarr (for CNN)..')
@@ -240,5 +243,6 @@ if MODE == 'all' or MODE == 'snn':
         else:
             print(f'------ Image {i+1} of {len(images)} done..')
         
+    balance_snn(CITY)
 
 print('--- Process complete.. \n')
