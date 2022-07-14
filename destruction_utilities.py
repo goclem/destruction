@@ -25,6 +25,8 @@ import gc
 
 import random
 from tensorflow.keras.metrics import CategoricalAccuracy, Precision, AUC
+from tensorflow.keras import backend as K
+
 
 import shutil
 
