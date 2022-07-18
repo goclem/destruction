@@ -19,7 +19,7 @@ args = parser.parse_args()
 #%% 
 # We declare parameters..
 CITY = 'test'
-TILE_SIZE = (128,128)
+TILE_SIZE = (64,64)
 MODE = 'all'
 
 # CNN Settings
