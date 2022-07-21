@@ -13,6 +13,7 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--city", help="city")
 parser.add_argument("--mode", help="mode: snn (or) cnn (or) all")
+parser.add_argument("--pre_image_index", help="index of images to use as pre image")
 args = parser.parse_args()
 
 
@@ -25,7 +26,7 @@ MODE = 'all'
 # CNN Settings
 ZERO_DAMAGE_BEFORE_YEAR = 2012
 # SNN Settings
-PRE_IMG_INDEX = 0
+PRE_IMG_INDEX = [0,1]
 
 #%%
 if args.city:
@@ -34,7 +35,10 @@ if args.city:
 if args.mode:
     MODE = args.mode
 
-print(f'\n--- Parameters: city={CITY}, mode={MODE}..')
+if args.pre_image_index:
+    PRE_IMG_INDEX = [int(el.strip()) for el in args.pre_image_index.split(",")]
+
+print(f'\n--- Parameters: city={CITY}, mode={MODE}, pre_image_index={PRE_IMG_INDEX}..')
 
 #%% HEADER
 # We load required packages..
@@ -210,39 +214,46 @@ if MODE == 'all' or MODE == 'snn':
     delete_zarr_if_exists(CITY, 'images_siamese_test_t0')
     delete_zarr_if_exists(CITY, 'images_siamese_valid_t0')
 
-    pre_image = read_raster(images[PRE_IMG_INDEX], dtype='uint8')
-    pre_image = tile_sequences(np.array([pre_image]), TILE_SIZE)
+    for j, pre_image_index in enumerate(PRE_IMG_INDEX):
+        print(f'------ Using pre image #{j+1}..')
 
-    for i in range(len(images)):
-        if i != PRE_IMG_INDEX:
-            label = np.array(read_raster(labels[i], dtype='int8'))
-            label = label.flatten()
-            exclude = np.where(label==-1.0)
-            label = np.delete(label, exclude)
-            samples_valid = np.delete(samples.flatten(), exclude)
-            _, label_train, label_test, label_valid = sample_split(label, samples_valid )
-            save_zarr(np.equal(label_train, 3), CITY, 'labels_siamese_train')
-            save_zarr(np.equal(label_test, 3), CITY, 'labels_siamese_test')
-            save_zarr(np.equal(label_valid, 3), CITY, 'labels_siamese_valid')
+        pre_image = read_raster(images[pre_image_index], dtype='uint8')
+        pre_image = tile_sequences(np.array([pre_image]), TILE_SIZE)
 
-        
-            image = read_raster(images[i], dtype='uint8')
-            image = tile_sequences(np.array([image]), TILE_SIZE)
-            image = np.delete(image, exclude, 0)
-            _, image_train, image_test, image_valid = sample_split(image, samples_valid)
-            save_zarr(flatten_image(image_train), CITY, 'images_siamese_train_tt')
-            save_zarr(flatten_image(image_test), CITY, 'images_siamese_test_tt')
-            save_zarr(flatten_image(image_valid), CITY, 'images_siamese_valid_tt')
+        for i in range(len(images)):
+            if i not in PRE_IMG_INDEX:
+                label = np.array(read_raster(labels[i], dtype='int8'))
+                label = label.flatten()
+                exclude = np.where(label==-1.0)
+                label = np.delete(label, exclude)
+                samples_valid = np.delete(samples.flatten(), exclude)
+                _, label_train, label_test, label_valid = sample_split(label, samples_valid )
+                save_zarr(np.equal(label_train, 3), CITY, 'labels_siamese_train')
+                save_zarr(np.equal(label_test, 3), CITY, 'labels_siamese_test')
+                save_zarr(np.equal(label_valid, 3), CITY, 'labels_siamese_valid')
+
             
-            pre_image_v = np.delete(pre_image, exclude, 0)
-            _, pre_image_train, pre_image_test, pre_image_valid = sample_split(pre_image_v, samples_valid)
-            save_zarr(flatten_image(pre_image_train), CITY, 'images_siamese_train_t0')
-            save_zarr(flatten_image(pre_image_test), CITY, 'images_siamese_test_t0')
-            save_zarr(flatten_image(pre_image_valid), CITY, 'images_siamese_valid_t0')
-            print(f'------ Image {i+1} of {len(images)} done..')
-        else:
-            print(f'------ Image {i+1} of {len(images)} done..')
-        
+                image = read_raster(images[i], dtype='uint8')
+                image = tile_sequences(np.array([image]), TILE_SIZE)
+                image = np.delete(image, exclude, 0)
+                _, image_train, image_test, image_valid = sample_split(image, samples_valid)
+                save_zarr(flatten_image(image_train), CITY, 'images_siamese_train_tt')
+                save_zarr(flatten_image(image_test), CITY, 'images_siamese_test_tt')
+                save_zarr(flatten_image(image_valid), CITY, 'images_siamese_valid_tt')
+                
+                pre_image_v = np.delete(pre_image, exclude, 0)
+                _, pre_image_train, pre_image_test, pre_image_valid = sample_split(pre_image_v, samples_valid)
+                save_zarr(flatten_image(pre_image_train), CITY, 'images_siamese_train_t0')
+                save_zarr(flatten_image(pre_image_test), CITY, 'images_siamese_test_t0')
+                save_zarr(flatten_image(pre_image_valid), CITY, 'images_siamese_valid_t0')
+                print(f'--------- Image {i+1 - len(PRE_IMG_INDEX)} of {len(images) - len(PRE_IMG_INDEX)} done..')
+            #%% 
+    # Generate a balanced (upsampled) dataset and shuffle it..
+    print('--- Generate a balanced (upsampled) dataset and shuffle it..')
+    delete_zarr_if_exists(CITY, 'labels_siamese_train_balanced')
+    delete_zarr_if_exists(CITY, 'images_siamese_train_t0_balanced')
+    delete_zarr_if_exists(CITY, 'images_siamese_train_tt_balanced')
     balance_snn(CITY)
+    shuffle_snn(CITY, TILE_SIZE, (1000,7500))
 
 print('--- Process complete.. \n')

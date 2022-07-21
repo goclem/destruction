@@ -20,6 +20,7 @@ import re
 from matplotlib import pyplot
 from rasterio import features, windows
 from tensorflow.keras import utils
+import tensorflow as tf
 import zarr
 import gc
 
@@ -292,6 +293,9 @@ def balance(city, path="../data"):
         z_i_a.append(to_add_i)
 
     gc.collect(generation=2)
+
+    delete_zarr_if_exists(city, 'labels_conv_train')
+    delete_zarr_if_exists(city, 'images_conv_train')
     
 def shuffle(city, tile_size, batch_sizes, path="../data"):
     
@@ -394,6 +398,10 @@ def balance_snn(city, path="../data"):
         z_i_tt_a.append(to_add_i_tt)
 
     gc.collect(generation=2)
+
+    delete_zarr_if_exists(city, 'labels_siamese_train')
+    delete_zarr_if_exists(city, 'images_siamese_train_t0')
+    delete_zarr_if_exists(city, 'images_siamese_train_tt')
     
     
 def recall_m(y_true, y_pred):
@@ -414,4 +422,93 @@ def f1_m(y_true, y_pred):
     return 2*((precision*recall)/(precision+recall+K.epsilon()))
 
 
+
+
+def shuffle_snn(city, tile_size, batch_sizes, path="../data"):
     
+    first, second = batch_sizes
+    
+    zarr_dir = f'{path}/{city}/others'
+#     path_l = f'{zarr_dir}/{city}_labels_conv_train.zarr'
+#     path_i = f'{zarr_dir}/{city}_images_conv_train.zarr'
+    path_l_b = f'{zarr_dir}/{city}_labels_siamese_train_balanced.zarr'
+    path_i_t0_b = f'{zarr_dir}/{city}_images_siamese_train_t0_balanced.zarr'
+    path_i_tt_b = f'{zarr_dir}/{city}_images_siamese_train_tt_balanced.zarr'
+    path_l_s = f'{zarr_dir}/{city}_labels_siamese_train_balanced_shuffled.zarr'
+    path_i_t0_s = f'{zarr_dir}/{city}_images_siamese_train_t0_balanced_shuffled.zarr'
+    path_i_tt_s = f'{zarr_dir}/{city}_images_siamese_train_tt_balanced_shuffled.zarr'
+
+    z_l = zarr.open(path_l_b)
+    z_i_t0 = zarr.open(path_i_t0_b)
+    z_i_tt = zarr.open(path_i_tt_b)
+    n = z_l.shape[0]
+
+    tuple_pair = make_tuple_pair(n, first)
+    np.random.shuffle(tuple_pair)
+    np.random.shuffle(tuple_pair)
+    zarr.save(path_l_s, np.empty((0)))
+    zarr.save(path_i_t0_s, np.empty((0, *tile_size, 3)))
+    zarr.save(path_i_tt_s, np.empty((0, *tile_size, 3)))
+
+    z_l_s = zarr.open(path_l_s, mode='a')
+    z_i_t0_s = zarr.open(path_i_t0_s, mode='a')
+    z_i_tt_s = zarr.open(path_i_tt_s, mode='a')
+    print(f"------ Reordering array in batches of {first}. Total {len(tuple_pair)} sets..")
+    
+    for i, t in enumerate(tuple_pair):
+        if i % 50 == 0 and i != 0:
+            print(f"--------- Finished {i} sets")
+        labels = z_l[t[0]:t[1]]
+        images_t0 = z_i_t0[t[0]:t[1]]
+        images_tt = z_i_tt[t[0]:t[1]]
+        z_l_s.append(labels)
+        z_i_t0_s.append(images_t0)
+        z_i_tt_s.append(images_tt)
+        
+    shutil.rmtree(path_l_b) 
+    shutil.rmtree(path_i_t0_b)
+    shutil.rmtree(path_i_tt_b)
+
+    del z_i_t0_s, z_i_tt_s, z_l_s, tuple_pair
+
+    zarr.save(path_l_b, np.empty((0)))
+    zarr.save(path_i_t0_b, np.empty((0, *tile_size, 3)))
+    zarr.save(path_i_tt_b, np.empty((0, *tile_size, 3)))
+
+    z_l = zarr.open(path_l_b, mode='a')
+    z_i_t0 = zarr.open(path_i_t0_b, mode='a')
+    z_i_tt = zarr.open(path_i_tt_b, mode='a')
+    z_l_s = zarr.open(path_l_s)
+    z_i_t0_s = zarr.open(path_i_t0_s)
+    z_i_tt_s = zarr.open(path_i_tt_s)
+    tuple_pair = make_tuple_pair(n, second)
+    print(f"------ Shuffling array in batches of {second}. Total {len(tuple_pair)} sets..")
+    for i, t in enumerate(tuple_pair):
+        if i % 15 == 0 and i != 0:
+            print(f"--------- Finished {i} sets")
+        shuffled = np.arange(0, t[1]-t[0])
+        np.random.shuffle(shuffled)
+        np.random.shuffle(shuffled)
+        labels = z_l_s[t[0]:t[1]][shuffled]
+        images_t0 = z_i_t0_s[t[0]:t[1]][shuffled]
+        images_tt = z_i_tt_s[t[0]:t[1]][shuffled]
+        z_l.append(labels)
+        z_i_t0.append(images_t0)
+        z_i_tt.append(images_tt)
+    
+    shutil.rmtree(path_l_s)
+    shutil.rmtree(path_i_t0_s)
+    shutil.rmtree(path_i_tt_s)
+
+def contrastive_loss(y, preds, margin=1):
+	# explicitly cast the true class label data type to the predicted
+	# class label data type (otherwise we run the risk of having two
+	# separate data types, causing TensorFlow to error out)
+	y = tf.cast(y, preds.dtype)
+	# calculate the contrastive loss between the true labels and
+	# the predicted labels
+	squaredPreds = K.square(preds)
+	squaredMargin = K.square(K.maximum(margin - preds, 0))
+	loss = K.mean(y * squaredPreds + (1 - y) * squaredMargin)
+	# return the computed contrastive loss to the calling function
+	return loss

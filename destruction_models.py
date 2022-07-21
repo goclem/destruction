@@ -9,6 +9,18 @@
 
 # Modules
 from tensorflow.keras import layers, models
+from tensorflow.keras import backend as K
+import tensorflow as tf
+
+
+def euclidean_distance(vectors):
+	# unpack the vectors into separate lists
+	(featsA, featsB) = vectors
+	# compute the sum of squared distances between the vectors
+	sumSquared = K.sum(K.square(featsA - featsB), axis=1,
+		keepdims=True)
+	# return the euclidean distance between the vectors
+	return K.sqrt(K.maximum(sumSquared, K.epsilon()))
 
 def dense_block(inputs, units:int=1, dropout:float=0, name:str=''):
     dense         = layers.Dense(units=units, activation='relu', use_bias=False, kernel_initializer='he_normal', name=f'{name}_dense')(inputs)
@@ -53,6 +65,8 @@ def encoder_block_shared(shape:tuple, filters:int=1, dropout=0):
     encoder = models.Model(inputs=inputs, outputs=outputs, name='encoder')
     return encoder
 
+
+
 def siamese_convolutional_network(shape:tuple, args_encode:dict, args_dense:dict):
     # Input layers
     images1 = layers.Input(shape=shape, name='images_t0')
@@ -71,3 +85,35 @@ def siamese_convolutional_network(shape:tuple, args_encode:dict, args_dense:dict
     # Model
     model   = models.Model(inputs=[images1, images2], outputs=outputs, name='siamese_convolutional_network')
     return model
+
+def siamese_block_shared(shape:tuple, units:int, filters:int=1, dropout=0):
+    inputs  = layers.Input(shape=shape, name='inputs')
+    tensor  = convolution_block(inputs, filters=filters*1, dropout=dropout, name='block1')
+    tensor  = convolution_block(tensor, filters=filters*2, dropout=dropout, name='block2')
+    tensor  = convolution_block(tensor, filters=filters*3, dropout=dropout, name='block3')
+    tensor  = convolution_block(tensor, filters=filters*4, dropout=dropout, name='block4')
+    tensor  = convolution_block(tensor, filters=filters*5, dropout=dropout, name='block5')
+    tensor = layers.Flatten(name='encoder_flatten')(tensor)
+    tensor   = dense_block(tensor, units=units, dropout=dropout, name='dense_block1')
+    outputs   = dense_block(tensor, units=units,  dropout=dropout, name='dense_block2')
+
+    encoder = models.Model(inputs=inputs, outputs=outputs, name='encoder')
+    return encoder
+
+def siamese_convolutional_network_dist(shape:tuple, args:dict):
+    # Input layers
+    images1 = layers.Input(shape=shape, name='images_t0')
+    images2 = layers.Input(shape=shape, name='images_tt')
+    # Hidden convolutional layers (shared parameters)
+    encoder_block = siamese_block_shared(shape=shape, **args)
+    encode1 = encoder_block(images1)
+    encode2 = encoder_block(images2)
+    # Hidden dense layers
+    distance = layers.Lambda(euclidean_distance)([encode1, encode2])
+    outputs = layers.Dense(units=1, activation='sigmoid', name='outputs')(distance)
+
+    # Output layer
+    # Model
+    model   = models.Model(inputs=[images1, images2], outputs=outputs, name='siamese_convolutional_network_dist')
+    return model
+
