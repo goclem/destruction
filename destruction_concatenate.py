@@ -25,7 +25,7 @@ def concat(cities, suffix, shape, path = '../data'):
             print(f"--------- {idx_range}")
             k = z[idx_range[0]:idx_range[1]][:]
             f.append(k)
-        print("Done with {city}_{suffix}, deleting now..")
+        print("------ Done with {city}_{suffix}, deleting now..")
         delete_zarr_if_exists(city, suffix)
 
 #%%
