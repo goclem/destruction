@@ -1,6 +1,4 @@
 #!/bin/sh
-
-echo("Starting preprocessing for SNN")
 python destruction_preprocess.py --city aleppo --mode snn --pre_image_index 0,1
 python destruction_preprocess.py --city damascus --mode snn --pre_image_index 0
 python destruction_preprocess.py --city daraa --mode snn --pre_image_index 0,1
