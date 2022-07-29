@@ -11,13 +11,33 @@ All scripts should be in a single folder used as a GitHub repository for easy sy
 	/damage.code-workspace
 	/damage_environment.yml
 	/damage_utilities.py
-	/damage_proprocess.py
+	/damage_preprocess.py
 	/damage_models.py
 	/damage_optimise.py
 	/damage_predict.py
 	/damage_postprocess.py
 	/damage_statistics.py
+
 ```
+**Details on `destruction_preprocess.py`**
+
+The script should be used via the command line and has the following options.
+
+
+* **city**, the city for which to run the preprocessing script on
+* **mode**, one of: snn (or) cnn (or) all
+* **pre_image_index**, index of images to use as pre image; for SNN only; first image is passed as index 0
+* **dataset**, one of: all (or) train (or) validate (or) test
+* **refresh_sample**, regenrate sample? default=False
+
+_Usage example_
+
+The following snippet prepares train, test, and validation data for SNN for the city of aleppo using the first two images as pre image; `sample.tif` will be generated from scratch and old `sample.tif` will be replaced.
+
+```
+python destruction_preprocess.py --city aleppo --mode snn --pre_image_index 0,1 --dataset all --refresh_sample
+```
+
 
 **Details on `utilities.py`**
 

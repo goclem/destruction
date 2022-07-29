@@ -14,20 +14,24 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--city", help="city")
 parser.add_argument("--mode", help="mode: snn (or) cnn (or) all")
 parser.add_argument("--pre_image_index", help="index of images to use as pre image")
+parser.add_argument("--dataset", help="what dataset to generate: test (or) validate (or) train (or) all")
+parser.add_argument('--refresh_sample', default=False, action="store_true",
+                    help="Regenerate sample?")
 args = parser.parse_args()
 
 
 #%% 
 # We declare parameters..
 CITY = 'test'
-TILE_SIZE = (64,64)
+TILE_SIZE = (128,128)
 MODE = 'all'
+REFRESH_SAMPLE = False
+DATASET='all'
 
 # CNN Settings
 ZERO_DAMAGE_BEFORE_YEAR = 2012
 # SNN Settings
 PRE_IMG_INDEX = [0,1]
-
 #%%
 if args.city:
     CITY = args.city
@@ -38,7 +42,13 @@ if args.mode:
 if args.pre_image_index:
     PRE_IMG_INDEX = [int(el.strip()) for el in args.pre_image_index.split(",")]
 
-print(f'\n--- Parameters: city={CITY}, mode={MODE}, pre_image_index={PRE_IMG_INDEX}..')
+if args.refresh_sample:
+    REFRESH_SAMPLE = args.refresh_sample
+
+if args.dataset:
+    DATASET = args.dataset
+
+print(f'\n--- Parameters: city={CITY}, mode={MODE}, dataset={DATASET}, pre_image_index={PRE_IMG_INDEX}, refresh_sample={REFRESH_SAMPLE}..')
 
 #%% HEADER
 # We load required packages..
@@ -85,14 +95,15 @@ noanalysis = rasterise(noanalysis, profile, dtype='bool')
 analysis   = np.logical_and(settlement, np.invert(noanalysis))
 del image, settlement, noanalysis
 
-# Splits samples
-np.random.seed(1)
-index   = dict(training=0.70, validation=0.15, test=0.15)
-index   = np.random.choice(np.arange(len(index)) + 1, np.sum(analysis), p=list(index.values()))
-samples = analysis.astype(int)
-np.place(samples, analysis, index)
-write_raster(samples, profile, f'../data/{CITY}/others/{CITY}_samples.tif', nodata=-1, dtype='int8')
-del index, samples, analysis
+if REFRESH_SAMPLE:
+    # Splits samples
+    np.random.seed(1)
+    index   = dict(training=0.70, validation=0.15, test=0.15)
+    index   = np.random.choice(np.arange(len(index)) + 1, np.sum(analysis), p=list(index.values()))
+    samples = analysis.astype(int)
+    np.place(samples, analysis, index)
+    write_raster(samples, profile, f'../data/{CITY}/others/{CITY}_samples.tif', nodata=-1, dtype='int8')
+    del index, samples, analysis
 
 # Calculate labels for each tile..
 print('--- Calculate labels for each tile..')
@@ -143,12 +154,15 @@ if  MODE == 'cnn' or MODE=='all':
     images  = search_data(pattern(city=CITY, type='image'))
     labels  = search_data(pattern(city=CITY, type='label'))
 
-    delete_zarr_if_exists(CITY, 'labels_conv_train')
-    delete_zarr_if_exists(CITY, 'labels_conv_valid')
-    delete_zarr_if_exists(CITY, 'labels_conv_test')
-    delete_zarr_if_exists(CITY, 'images_conv_train')
-    delete_zarr_if_exists(CITY, 'images_conv_valid')
-    delete_zarr_if_exists(CITY, 'images_conv_test')
+    if DATASET == 'train' or DATASET=='all':
+        delete_zarr_if_exists(CITY, 'labels_conv_train')
+        delete_zarr_if_exists(CITY, 'images_conv_train')
+    if DATASET == 'validate' or DATASET=='all':
+        delete_zarr_if_exists(CITY, 'labels_conv_valid')
+        delete_zarr_if_exists(CITY, 'images_conv_valid')
+    if DATASET == 'test' or DATASET=='all':
+        delete_zarr_if_exists(CITY, 'labels_conv_test')
+        delete_zarr_if_exists(CITY, 'images_conv_test')
 
     for i in range(len(images)):
         label = np.array(read_raster(labels[i]))
@@ -160,15 +174,22 @@ if  MODE == 'cnn' or MODE=='all':
         label[label!=3.0] = 0.0
         label[label==3.0] = 1.0
         _, train, validate, test = sample_split(label, np.delete(samples.flatten(), exclude))
-        train_shuffle = np.arange(len(train))
-        validate_shuffle = np.arange(len(validate))
-        test_shuffle = np.arange(len(test))
-        np.random.shuffle(train_shuffle)
-        np.random.shuffle(validate_shuffle)
-        np.random.shuffle(test_shuffle)
-        save_zarr(train[train_shuffle].reshape(np.take(train.shape, [0,2,3,4])), CITY, 'labels_conv_train')
-        save_zarr(validate[validate_shuffle].reshape(np.take(validate.shape, [0,2,3,4])), CITY, 'labels_conv_valid')
-        save_zarr(test[test_shuffle].reshape(np.take(test.shape, [0,2,3,4])), CITY, 'labels_conv_test')
+        
+        if DATASET == 'train' or DATASET=='all':
+            train_shuffle = np.arange(len(train))
+            np.random.shuffle(train_shuffle)
+            save_zarr(train[train_shuffle].reshape(np.take(train.shape, [0,2,3,4])), CITY, 'labels_conv_train')
+
+        if DATASET == 'validate' or DATASET=='all':
+            validate_shuffle = np.arange(len(validate))
+            np.random.shuffle(validate_shuffle)
+            save_zarr(validate[validate_shuffle].reshape(np.take(validate.shape, [0,2,3,4])), CITY, 'labels_conv_valid')
+
+        if DATASET == 'test' or DATASET=='all':
+            test_shuffle = np.arange(len(test))
+            np.random.shuffle(test_shuffle)
+            save_zarr(test[test_shuffle].reshape(np.take(test.shape, [0,2,3,4])), CITY, 'labels_conv_test')
+            
         del _, train, validate, test, label
 
         image = np.array(read_raster(images[i]))
@@ -177,23 +198,30 @@ if  MODE == 'cnn' or MODE=='all':
         image = tile_sequences(image,  tile_size=TILE_SIZE)
         image = np.delete(image, exclude, 0)
         _, train, validate, test = sample_split(image, np.delete(samples.flatten(), exclude))
-        save_zarr(train[train_shuffle].reshape(np.take(train.shape, [0,2,3,4])), CITY, 'images_conv_train')
-        save_zarr(validate[validate_shuffle].reshape(np.take(validate.shape, [0,2,3,4])), CITY,'images_conv_valid')
-        save_zarr(test[test_shuffle].reshape(np.take(test.shape, [0,2,3,4])), CITY,'images_conv_test') 
+        
+        if DATASET == 'train' or DATASET=='all':
+            save_zarr(train[train_shuffle].reshape(np.take(train.shape, [0,2,3,4])), CITY, 'images_conv_train')
+        if DATASET == 'validate' or DATASET=='all':
+            save_zarr(validate[validate_shuffle].reshape(np.take(validate.shape, [0,2,3,4])), CITY,'images_conv_valid')
+        if DATASET == 'test' or DATASET=='all':
+            save_zarr(test[test_shuffle].reshape(np.take(test.shape, [0,2,3,4])), CITY,'images_conv_test') 
+        
         del _, train, validate, test, image, exclude
         print(f'------ {dates[i]}')
+        
         gc.collect(generation=2)
     del samples, images, labels
 
-    #%% 
-    # Generate a balanced (upsampled) dataset and shuffle it..
-    print('--- Generate a balanced (upsampled) dataset and shuffle it..')
-    delete_zarr_if_exists(CITY, 'labels_conv_train_balanced')
-    delete_zarr_if_exists(CITY, 'images_conv_train_balanced')
-    delete_zarr_if_exists(CITY, 'labels_conv_train_balanced_shuffled')
-    delete_zarr_if_exists(CITY, 'images_conv_train_balanced_shuffled')
-    balance(CITY)
-    shuffle(CITY, TILE_SIZE, (1000,7500))
+    if DATASET == 'train' or DATASET=='all':
+        #%% 
+        # Generate a balanced (upsampled) dataset and shuffle it..
+        print('--- Generate a balanced (upsampled) dataset and shuffle it..')
+        delete_zarr_if_exists(CITY, 'labels_conv_train_balanced')
+        delete_zarr_if_exists(CITY, 'images_conv_train_balanced')
+        delete_zarr_if_exists(CITY, 'labels_conv_train_balanced_shuffled')
+        delete_zarr_if_exists(CITY, 'images_conv_train_balanced_shuffled')
+        balance(CITY)
+        shuffle(CITY, TILE_SIZE, (1000,7500))
 
 
 if MODE == 'all' or MODE == 'snn':
@@ -204,16 +232,22 @@ if MODE == 'all' or MODE == 'snn':
     images  = search_data(pattern(city=CITY, type='image'))
     labels  = search_data(pattern(city=CITY, type='label'))
 
-    delete_zarr_if_exists(CITY, 'labels_siamese_train')
-    delete_zarr_if_exists(CITY, 'labels_siamese_test')
-    delete_zarr_if_exists(CITY, 'labels_siamese_valid')
-    delete_zarr_if_exists(CITY, 'images_siamese_train_tt')
-    delete_zarr_if_exists(CITY, 'images_siamese_test_tt')
-    delete_zarr_if_exists(CITY, 'images_siamese_valid_tt')
-    delete_zarr_if_exists(CITY, 'images_siamese_train_t0')
-    delete_zarr_if_exists(CITY, 'images_siamese_test_t0')
-    delete_zarr_if_exists(CITY, 'images_siamese_valid_t0')
+    if DATASET=='train' or DATASET=='all':
+        delete_zarr_if_exists(CITY, 'labels_siamese_train')
+        delete_zarr_if_exists(CITY, 'images_siamese_train_tt')
+        delete_zarr_if_exists(CITY, 'images_siamese_train_t0')
+    
+    if DATASET=='validate' or DATASET=='all':
+        delete_zarr_if_exists(CITY, 'labels_siamese_valid')
+        delete_zarr_if_exists(CITY, 'images_siamese_valid_tt')
+        delete_zarr_if_exists(CITY, 'images_siamese_valid_t0')
 
+    if DATASET=='test' or DATASET=='all':
+        delete_zarr_if_exists(CITY, 'labels_siamese_test')
+        delete_zarr_if_exists(CITY, 'images_siamese_test_tt')
+        delete_zarr_if_exists(CITY, 'images_siamese_test_t0')
+    
+    
     for j, pre_image_index in enumerate(PRE_IMG_INDEX):
         print(f'------ Using pre image #{j+1}..')
 
@@ -228,32 +262,43 @@ if MODE == 'all' or MODE == 'snn':
                 label = np.delete(label, exclude)
                 samples_valid = np.delete(samples.flatten(), exclude)
                 _, label_train, label_test, label_valid = sample_split(label, samples_valid )
-                save_zarr(np.equal(label_train, 3), CITY, 'labels_siamese_train')
-                save_zarr(np.equal(label_test, 3), CITY, 'labels_siamese_test')
-                save_zarr(np.equal(label_valid, 3), CITY, 'labels_siamese_valid')
+
+                if DATASET=='train' or DATASET=='all':
+                    save_zarr(np.equal(label_train, 3), CITY, 'labels_siamese_train')
+                if DATASET=='validate' or DATASET=='all':
+                    save_zarr(np.equal(label_valid, 3), CITY, 'labels_siamese_valid')
+                if DATASET=='test' or DATASET=='all':
+                    save_zarr(np.equal(label_test, 3), CITY, 'labels_siamese_test')
 
             
                 image = read_raster(images[i], dtype='uint8')
                 image = tile_sequences(np.array([image]), TILE_SIZE)
                 image = np.delete(image, exclude, 0)
                 _, image_train, image_test, image_valid = sample_split(image, samples_valid)
-                save_zarr(flatten_image(image_train), CITY, 'images_siamese_train_tt')
-                save_zarr(flatten_image(image_test), CITY, 'images_siamese_test_tt')
-                save_zarr(flatten_image(image_valid), CITY, 'images_siamese_valid_tt')
-                
+                if DATASET=='train' or DATASET=='all':
+                    save_zarr(flatten_image(image_train), CITY, 'images_siamese_train_tt')
+                if DATASET=='validate' or DATASET=='all':
+                    save_zarr(flatten_image(image_valid), CITY, 'images_siamese_valid_tt')
+                if DATASET=='test' or DATASET=='all':
+                    save_zarr(flatten_image(image_test), CITY, 'images_siamese_test_tt')
+
                 pre_image_v = np.delete(pre_image, exclude, 0)
                 _, pre_image_train, pre_image_test, pre_image_valid = sample_split(pre_image_v, samples_valid)
-                save_zarr(flatten_image(pre_image_train), CITY, 'images_siamese_train_t0')
-                save_zarr(flatten_image(pre_image_test), CITY, 'images_siamese_test_t0')
-                save_zarr(flatten_image(pre_image_valid), CITY, 'images_siamese_valid_t0')
+                if DATASET=='train' or DATASET=='all':
+                    save_zarr(flatten_image(pre_image_train), CITY, 'images_siamese_train_t0')
+                if DATASET=='validate' or DATASET=='all':
+                    save_zarr(flatten_image(pre_image_valid), CITY, 'images_siamese_valid_t0')
+                if DATASET=='test' or DATASET=='all':
+                    save_zarr(flatten_image(pre_image_test), CITY, 'images_siamese_test_t0')
                 print(f'--------- Image {i+1 - len(PRE_IMG_INDEX)} of {len(images) - len(PRE_IMG_INDEX)} done..')
             #%% 
-    # Generate a balanced (upsampled) dataset and shuffle it..
-    print('--- Generate a balanced (upsampled) dataset and shuffle it..')
-    delete_zarr_if_exists(CITY, 'labels_siamese_train_balanced')
-    delete_zarr_if_exists(CITY, 'images_siamese_train_t0_balanced')
-    delete_zarr_if_exists(CITY, 'images_siamese_train_tt_balanced')
-    balance_snn(CITY)
-    shuffle_snn(CITY, TILE_SIZE, (1000,7500))
+    if DATASET=='train' or DATASET=='all':
+        # Generate a balanced (upsampled) dataset and shuffle it..
+        print('--- Generate a balanced (upsampled) dataset and shuffle it..')
+        delete_zarr_if_exists(CITY, 'labels_siamese_train_balanced')
+        delete_zarr_if_exists(CITY, 'images_siamese_train_t0_balanced')
+        delete_zarr_if_exists(CITY, 'images_siamese_train_tt_balanced')
+        balance_snn(CITY)
+        shuffle_snn(CITY, TILE_SIZE, (1000,7500))
 
 print('--- Process complete.. \n')
