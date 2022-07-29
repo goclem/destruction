@@ -15,12 +15,12 @@ import tensorflow as tf
 
 def euclidean_distance(vectors):
 	# unpack the vectors into separate lists
-	(featsA, featsB) = vectors
+	featsA, featsB = vectors[0], vectors[1]
 	# compute the sum of squared distances between the vectors
 	sumSquared = K.sum(K.square(featsA - featsB), axis=1,
 		keepdims=True)
 	# return the euclidean distance between the vectors
-	return K.sqrt(K.maximum(sumSquared, K.epsilon()))
+	return K.sqrt(sumSquared)
 
 def dense_block(inputs, units:int=1, dropout:float=0, name:str=''):
     dense         = layers.Dense(units=units, activation='relu', use_bias=False, kernel_initializer='he_normal', name=f'{name}_dense')(inputs)
@@ -28,7 +28,7 @@ def dense_block(inputs, units:int=1, dropout:float=0, name:str=''):
     outputs       = layers.Dropout(rate=dropout, name=f'{name}_dropout')(normalisation)
     return outputs
 
-def convolution_block(inputs, filters:int, dropout:float, name:str):
+def convolution_block(inputs, filters:int, dropout:float=0, name:str=''):
     convolution   = layers.Conv2D(filters=filters, kernel_size=(3, 3), activation='relu', padding='same', use_bias=False, kernel_initializer='he_normal', name=f'{name}_convolution')(inputs)
     pooling       = layers.MaxPool2D(pool_size=(2, 2), name=f'{name}_pooling')(convolution)
     normalisation = layers.BatchNormalization(name=f'{name}_normalisation')(pooling)
@@ -77,9 +77,11 @@ def siamese_convolutional_network(shape:tuple, args_encode:dict, args_dense:dict
     encode2 = encoder_block(images2)
     # Hidden dense layers
     concat  = layers.Concatenate(name='concatenate')(inputs=[encode1, encode2])
-    dense   = dense_block(concat, **args_dense, name='dense_block1')
-    dense   = dense_block(dense,  **args_dense, name='dense_block2')
-    dense   = dense_block(dense,  **args_dense, name='dense_block3')
+
+    units, dropout = args_dense['units'], args_dense['dropout']
+    dense   = dense_block(concat, units = units, dropout=dropout, name='dense_block1')
+    dense   = dense_block(dense, units = units, dropout=dropout/2, name='dense_block2')
+    dense   = dense_block(dense, units = units, dropout=dropout/4, name='dense_block3')
     # Output layer
     outputs = layers.Dense(units=1, activation='sigmoid', name='outputs')(dense)
     # Model
@@ -89,13 +91,16 @@ def siamese_convolutional_network(shape:tuple, args_encode:dict, args_dense:dict
 def siamese_block_shared(shape:tuple, units:int, filters:int=1, dropout=0):
     inputs  = layers.Input(shape=shape, name='inputs')
     tensor  = convolution_block(inputs, filters=filters*1, dropout=dropout, name='block1')
-    tensor  = convolution_block(tensor, filters=filters*2, dropout=dropout, name='block2')
+    tensor  = convolution_block(tensor, filters=filters*2,  name='block2')
     tensor  = convolution_block(tensor, filters=filters*3, dropout=dropout, name='block3')
-    tensor  = convolution_block(tensor, filters=filters*4, dropout=dropout, name='block4')
+    tensor  = convolution_block(tensor, filters=filters*4,  name='block4')
     tensor  = convolution_block(tensor, filters=filters*5, dropout=dropout, name='block5')
     tensor = layers.Flatten(name='encoder_flatten')(tensor)
-    tensor   = dense_block(tensor, units=units, dropout=dropout, name='dense_block1')
-    outputs   = dense_block(tensor, units=units,  dropout=dropout, name='dense_block2')
+    tensor  = dense_block(tensor, units=units,  name='dense_block1')
+    tensor  = dense_block(tensor, units=units, dropout=dropout, name='dense_block2')
+    tensor  = dense_block(tensor, units=units/2,  name='dense_block3')
+    tensor  = dense_block(tensor, units=units/2, dropout=dropout, name='dense_block4')
+    outputs  = dense_block(tensor, units=units/8,   name='dense_block5')
 
     encoder = models.Model(inputs=inputs, outputs=outputs, name='encoder')
     return encoder

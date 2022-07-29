@@ -486,6 +486,7 @@ def shuffle_snn(city, tile_size, batch_sizes, path="../data"):
     for i, t in enumerate(tuple_pair):
         if i % 15 == 0 and i != 0:
             print(f"--------- Finished {i} sets")
+        print(t)
         shuffled = np.arange(0, second)
         np.random.shuffle(shuffled)
         np.random.shuffle(shuffled)
