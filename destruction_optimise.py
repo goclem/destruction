@@ -25,75 +25,54 @@ params = argparse.Namespace(
     tile_size=128, 
     grid_size=20, 
     batch_size=16, 
-    mapping={'0':0, '1':1, '2':1, '3':1, '255':255}) #! Choose
-
-#%% READS DATA
-
-def load_sequences(files:list, grid_size:int, tile_size:int, stride:int=None) -> torch.Tensor:
-    window    = center_window(source=files[0], size=(grid_size*tile_size, grid_size*tile_size))
-    sequences = [read_raster(file, window=window, dtype='uint8') for file in files]
-    sequences = [torch.tensor(image).permute(2, 0, 1) for image in sequences]
-    sequences = [image_to_tiles(image, tile_size=tile_size, stride=stride) for image in sequences]
-    sequences = torch.stack(sequences).swapaxes(1, 0)
-    return sequences
-
-# Reads images
-images = search_data(pattern('aleppo', 'image'))
-images = load_sequences(images, grid_size=params.grid_size, tile_size=params.tile_size)
-images = images / 255
-
-# Reads labels
-labels = search_data(pattern(city='aleppo', type='label'))
-labels = load_sequences(labels, grid_size=params.grid_size, tile_size=1)
-labels = labels.squeeze(2, 3) 
-
-# Remaps label values
-labels = labels.apply_(lambda val: params.mapping.get(str(val))).type(torch.float)
-labels = torch.where(labels == 255, torch.tensor(float('nan')), labels)
-
-# Reads samples
-samples = search_data('aleppo_samples.tif$')
-samples = load_sequences(samples, grid_size=params.grid_size, tile_size=1)
-samples = samples.squeeze()
-
-#? Balances sequences
-def balance_sequences(labels:torch.Tensor) -> torch.Tensor:
-    subset = np.any(labels.numpy().astype(bool), axis=(1,2))
-    negobs = np.random.choice(np.argwhere(~subset).flatten(), subset.sum(), replace=False)
-    np.put(subset, negobs, True)
-    subset = torch.Tensor(subset).type(torch.bool)
-    return subset
-
-subset  = balance_sequences(labels)
-images  = images[subset]
-labels  = labels[subset]
-samples = samples[subset]
-del subset
+    mapping={0:0, 1:1, 2:1, 3:1, 255:torch.tensor(float('nan'))}) #! Choose
 
 #%% INITIALISES DATA LOADERS
 
-class Dataset(utils.data.Dataset):
-    def __init__(self, images, labels):
-        self.images = images
-        self.labels = labels
-
-    def __len__(self):
-        return len(self.images)
-
-    def __getitem__(self, idx:int) -> typing.Tuple[torch.Tensor, torch.Tensor]:
-        image = self.images[idx]
-        label = self.labels[idx]
-        return image, label
+class ZarrDataset(utils.data.Dataset):
+    '''Zarr dataset for PyTorch'''
+    def __init__(self, images:str, labels:str, mapping:str=None):
+        self.images  = zarr.open(images, mode='r')
+        self.labels  = zarr.open(labels, mode='r')
+        self.mapping = mapping
+        self.length  = len(self.images)
     
-# Split samples
-_, images_train, images_valid, images_test = sample_split(images, samples)
-_, labels_train, labels_valid, labels_test = sample_split(labels, samples)
-del samples, _
+    def __len__(self):
+        return self.length
+    
+    def __getitem__(self, idx):
+        # Read data from the Zarr dataset at the specified index
+        X = torch.from_numpy(self.images[idx]).float()
+        Y = torch.from_numpy(self.labels[idx]).float()
+        X = torch.div(X, 255)
+        if self.mapping is not None:
+            Y.apply_(lambda x: self.mapping.get(x, x))
+        return X, Y
 
-train_loader = utils.data.DataLoader(Dataset(images_train, labels_train), batch_size=params.batch_size, shuffle=True)
-valid_loader = utils.data.DataLoader(Dataset(images_valid, labels_valid), batch_size=params.batch_size, shuffle=True)
-test_loader  = utils.data.DataLoader(Dataset(images_test,  labels_test),  batch_size=params.batch_size, shuffle=False)
-del Dataset, images, labels, images_train, images_valid, images_test, labels_train, labels_valid, labels_test
+train_loader = ZarrDataset(
+    images=f'{paths.data}/aleppo/zarr/images_train.zarr',
+    labels=f'{paths.data}/aleppo/zarr/labels_train.zarr',
+    mapping=params.mapping)
+
+valid_loader = ZarrDataset(
+    images=f'{paths.data}/aleppo/zarr/images_valid.zarr',
+    labels=f'{paths.data}/aleppo/zarr/labels_valid.zarr',
+    mapping=params.mapping)
+
+test_loader = ZarrDataset(
+    images=f'{paths.data}/aleppo/zarr/images_test.zarr',
+    labels=f'{paths.data}/aleppo/zarr/labels_test.zarr',
+    mapping=params.mapping)
+
+train_loader = utils.data.DataLoader(train_loader, batch_size=params.batch_size)
+valid_loader = utils.data.DataLoader(valid_loader, batch_size=params.batch_size)
+test_loader  = utils.data.DataLoader(test_loader,  batch_size=params.batch_size)
+
+''' Checks data loaders
+X, Y = next(iter(train_loader))
+display_sequence(X[0], Y[0], grid_size=(5,5))
+del X, Y
+''' 
 
 #%% INTIALISES MODELS
 
@@ -128,12 +107,12 @@ del image_encoder, sequence_encoder, prediction_head
 #? Loads previous checkpoint
 model = torch.load(f'{paths.models}/ModelWrapper_best.pth')
 
-#? (1) Parameter alignment i.e. freezes image encoder's parameters
+#? Parameter alignment i.e. freezes image encoder's parameters
 model.image_encoder = set_trainable(model.image_encoder, False)
 optimiser = optim.AdamW(model.parameters(), lr=1e-4)
 count_parameters(model)
 
-''' #? (2) Fine tuning i.e. unfreezes image encoder's parameters
+''' #? Fine tuning i.e. unfreezes image encoder's parameters
 model.image_encoder = set_trainable(model.image_encoder, True)
 optimiser = optim.AdamW(model.parameters(), lr=1e-5)
 count_parameters(model)
