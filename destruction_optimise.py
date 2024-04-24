@@ -17,10 +17,15 @@ from destruction_models import *
 from destruction_utilities import *
 from torch import optim, nn, utils
 from os import path
+from sklearn import metrics
 
 # Utilities
 device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
-params = argparse.Namespace(tile_size=128, grid_size=20, batch_size=16, mapping={'0':0, '1':0, '2':0, '3':1, '255':255})
+params = argparse.Namespace(
+    tile_size=128, 
+    grid_size=20, 
+    batch_size=16, 
+    mapping={'0':0, '1':0, '2':0, '3':1, '255':255})
 
 #%% READS DATA
 
@@ -120,12 +125,15 @@ del image_encoder, sequence_encoder, prediction_head
 
 #%% OPTIMISATION
 
-#? Parameter alignment (freezes  feature extractor)
+#? Loads previous checkpoint
+model = torch.load(f'{paths.models}/ModelWrapper_best.pth')
+
+#? (1) Parameter alignment i.e. freezes image encoder's parameters
 model.image_encoder = set_trainable(model.image_encoder, False)
 optimiser = optim.AdamW(model.parameters(), lr=1e-4)
 count_parameters(model)
 
-''' #? Fine tuning (unfreezes feature extractor)
+''' #? (2) Fine tuning i.e. unfreezes image encoder's parameters
 model.image_encoder = set_trainable(model.image_encoder, True)
 optimiser = optim.AdamW(model.parameters(), lr=1e-5)
 count_parameters(model)
@@ -143,32 +151,42 @@ train(model=model,
       optimiser=optimiser, 
       n_epochs=10, 
       patience=3,
-      accumulate=1)
+      accumulate=1,
+      path=paths.models)
 
 # Restores best model
 model = torch.load(f'{paths.models}/ModelWrapper_best.pth')
 
 # Testing
-validate(model=model, 
-         loader=test_loader, 
-         device=device, 
-         criterion=criterion)
-
+validate(model=model, loader=test_loader, device=device, criterion=criterion)
 empty_cache(device)
+
+#%% ESTIMATES THRESHOLD
+
+# Threshold estimation
+Y, Yh  = predict(model, loader=train_loader, device=device)
+subset = ~Y.isnan()
+precision, recall, threshold = metrics.precision_recall_curve(Y[subset].cpu(), Yh[subset].cpu())
+fscore    = (2 * precision * recall) / (precision + recall)
+threshold = threshold[np.argmax(fscore)]
+del Y, Yh, subset, precision, recall, fscore
+
+# Testing
+validate(model=model, loader=test_loader, device=device, criterion=criterion, threshold=threshold)
 
 #%% CHECKS PREDICTIONS
 
-''' Checks predictions
 with torch.no_grad():
     X, Y = next(iter(test_loader))
     Yh = model(X.to(device)).cpu()
 
-for i in np.random.choice(range(len(Y)), 2, replace=False):
-    titles = [f'Y: {y:.2f} | Yh: {np.round(yh):.2f} ({yh:.2f})'for y, yh in zip(Y[i].squeeze().tolist(), Yh[i].squeeze().tolist())]
-    display_sequence(X[i], titles, grid_size=(5,5))
-del titles
+Y, Yh  = Y.squeeze().numpy(), Yh.squeeze_().numpy()
+status = np.where(np.isnan(Y), 'Nan', np.equal(Y, Yh > threshold))
 
-Yh = predict(model, loader=test_loader, device=device)
-'''
+for i in np.random.choice(range(len(Y)), 2, replace=False):
+    titles = [f'{s}\nY: {y:.0f} - Yh: {yh > threshold:.0f} ({yh:.2f})'for s, y, yh in zip(status[i], Y[i], Yh[i])]
+    display_sequence(X[i], titles, grid_size=(5,5))
+
+del titles
 
 #%%

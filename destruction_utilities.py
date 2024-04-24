@@ -217,7 +217,7 @@ class BceLoss(nn.Module):
 def print_statistics(i_batch:int, n_batches:int, running_loss:torch.Tensor, n_obs:int, n_correct:int, label:str, print_format:str=f'02') -> None:
     '''Prints the current statistics of a batch'''
     end_print = '\r' if i_batch+1 < n_batches else '\n'
-    print(f'- {label: <10} | Batch {i_batch+1:{print_format}d}/{n_batches:{print_format}d} | Loss {running_loss / n_obs:.4f} | Accuracy {n_correct / n_obs:.4f}', end=end_print)
+    print(f'{label: <10} | Batch {i_batch+1:{print_format}d}/{n_batches:{print_format}d} | Loss {running_loss / n_obs:.4f} | Accuracy {n_correct / n_obs:.4f}', end=end_print)
 
 def print_epoch(i_epoch:int, n_epochs:int) -> None:
     '''Prints the current epoch'''
@@ -250,7 +250,7 @@ def optimise(model:nn.Module, loader, device:torch.device, criterion, optimiser,
         print_statistics(i_batch=i, n_batches=len(loader), running_loss=running_loss, n_obs=n_obs, n_correct=n_correct, label='Training')
     return running_loss / n_obs
 
-def validate(model, loader, device:torch.device, criterion):
+def validate(model, loader, device:torch.device, criterion, threshold:float=0.5):
     '''Validates a model using a validation sample for one epoch'''
     model.eval()
     n_correct, n_obs, running_loss = 0, 0, 0.0
@@ -259,12 +259,12 @@ def validate(model, loader, device:torch.device, criterion):
             X, Y = X.to(device), Y.to(device)
             Yh   = model(X)
             loss = criterion(Yh, Y)
-        # Statistics
-        subset = ~torch.isnan(Y)
-        n_obs += torch.sum(subset)
-        n_correct += (Yh[subset].round() == Y[subset]).sum().item()
-        running_loss += (loss * torch.sum(subset)).item()
-        print_statistics(i_batch=i, n_batches=len(loader), running_loss=running_loss, n_obs=n_obs, n_correct=n_correct, label='Validation')
+            # Statistics
+            subset = ~torch.isnan(Y)
+            n_obs += torch.sum(subset)
+            n_correct += ((Yh[subset] > threshold).float() == Y[subset]).sum().item()
+            running_loss += (loss * torch.sum(subset)).item()
+            print_statistics(i_batch=i, n_batches=len(loader), running_loss=running_loss, n_obs=n_obs, n_correct=n_correct, label='Validation')
         return running_loss / n_obs
 
 def train(model, train_loader, valid_loader, device:torch.device, criterion, optimiser, n_epochs:int=1, patience:int=1, accumulate:int=1, path=paths.models):
@@ -290,11 +290,13 @@ def predict(model, loader, device:torch.device):
     '''Predicts the labels of a sample'''
     print_format = len(str(len(loader)))
     model.eval()
-    Yh = [None] * len(loader)
+    Ys, Yhs = [None]*len(loader), [None]*len(loader)
     with torch.no_grad():
-        for i, (X, _) in enumerate(loader):
-            Yh[i] = model(X.to(device))
+        for i, (X, Y) in enumerate(loader):
+            Ys[i]  = Y
+            Yhs[i] = model(X.to(device))
             print(f'Batch {i+1:{print_format}d}/{len(loader):{print_format}d}', end='\r')
-    Yh = torch.cat(Yh)
-    return Yh
+    Ys  = torch.cat(Ys)
+    Yhs = torch.cat(Yhs)
+    return Ys, Yhs
 # %%

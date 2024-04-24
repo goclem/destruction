@@ -39,9 +39,13 @@
 
 - Format with fast block reading and in-place shuffling
 - Saving three files per city containing the train, test, and validation sequences
-- Predict using moving windows
 - Need labels at the same resolution as the image
 - Augmentation using subsets of sequences
+
+**Predictions**
+
+- Predict using moving windows
+- Estimate the threshold that maximises the F-score
 
 ## Questions
 
