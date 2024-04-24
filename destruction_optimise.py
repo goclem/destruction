@@ -46,7 +46,7 @@ class ZarrDataset(utils.data.Dataset):
         Y = torch.from_numpy(self.labels[idx]).float()
         X = torch.div(X, 255)
         if self.mapping is not None:
-            Y.apply_(lambda x: self.mapping.get(x, x))
+            Y.apply_(lambda y: self.mapping.get(y, y))
         return X, Y
 
 train_loader = ZarrDataset(
