@@ -11,15 +11,12 @@
 # Packages
 import numpy as np
 import torch
-import satlaspretrain_models
 import typing
 
 from destruction_models import *
 from destruction_utilities import *
 from torch import optim, nn, utils
-from numpy import random
 from os import path
-from sklearn import metrics as skmetrics
 
 # Utilities
 device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
@@ -96,6 +93,7 @@ del Dataset, images, labels, images_train, images_valid, images_test, labels_tra
 #%% INTIALISES MODELS
 
 ''' #! Downloads pre-trained model
+import satlaspretrain_models
 image_encoder = satlaspretrain_models.Weights()
 image_encoder = image_encoder.get_pretrained_model(model_identifier='Aerial_SwinB_SI', fpn=True, device='cpu')
 torch.save(image_encoder, path.join(paths.models, 'Aerial_SwinB_SI.pth'))
@@ -165,7 +163,7 @@ with torch.no_grad():
     X, Y = next(iter(test_loader))
     Yh = model(X.to(device)).cpu()
 
-for i in random.choice(range(len(Y)), 2, replace=False):
+for i in np.random.choice(range(len(Y)), 2, replace=False):
     titles = [f'Y: {y:.2f} | Yh: {np.round(yh):.2f} ({yh:.2f})'for y, yh in zip(Y[i].squeeze().tolist(), Yh[i].squeeze().tolist())]
     display_sequence(X[i], titles, grid_size=(5,5))
 del titles
