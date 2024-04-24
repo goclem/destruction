@@ -111,3 +111,5 @@ for i, (image, label) in enumerate(zip(images, labels)):
             dataset[:,i] = array
             del label, array, shape, dataset
     del image, label, arrays
+
+del images, labels, samples
