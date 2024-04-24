@@ -10,7 +10,6 @@
 
 # Packages
 import zarr
-
 from destruction_utilities import *
 
 # Utilities
@@ -18,30 +17,31 @@ params = argparse.Namespace(city='aleppo', tile_size=128)
 
 #%% DATA PREPROCESSING
 
-def load_sequences(files:list, tile_size:int, window:int=None, stride:int=None) -> torch.Tensor:
-    if window is not None:
-        window = center_window(source=files[0], size=(window*tile_size, window*tile_size))
-    sequences = [read_raster(file, window=window, dtype='uint8') for file in files]
-    sequences = [torch.tensor(image).permute(2, 0, 1) for image in sequences]
-    sequences = [image_to_tiles(image, tile_size=tile_size, stride=stride) for image in sequences]
-    sequences = torch.stack(sequences).swapaxes(1, 0)
-    return sequences
+#! Removes existing zarr
+reset_folder(f'{paths.data}/{params.city}/zarr', remove=True)
 
-# Reads images
-images = search_data(pattern(city=params.city, type='image'))[:5]
-images = load_sequences(images, tile_size=params.tile_size)
-images = images / 255
+# Files
+images  = search_data(pattern(city=params.city, type='image'))
+labels  = search_data(pattern(city=params.city, type='label'))
 
-# Reads labels
-labels = search_data(pattern(city=params.city, type='label'))
-labels = load_sequences(labels, grid_size=params.grid_size, tile_size=1)
-labels = labels.squeeze(2, 3) 
+# Samples
+samples = search_data(f'{params.city}_samples.tif$')
+samples = load_sequences(samples, tile_size=1).squeeze()
 
-# Remaps label values
-# labels = labels.apply_(lambda val: params.mapping.get(str(val))).type(torch.float)
-# labels = torch.where(labels == 255, torch.tensor(float('nan')), labels)
-
-# Reads samples
-samples = search_data('aleppo_samples.tif$')
-samples = load_sequences(samples, grid_size=params.grid_size, tile_size=1)
-samples = samples.squeeze()
+# Writes zarr arrays
+for i, (image, label) in enumerate(zip(images, labels)):
+    print(f'Processing period {i+1:02d}/{len(images)}')
+    # Loads images and labels
+    arrays = dict(
+        image=load_sequences([image], tile_size=params.tile_size).squeeze(1).numpy(),
+        label=load_sequences([label], tile_size=1).squeeze(2, 3, 4).numpy())
+    # Writes data for each sample
+    for subsample, value in dict(train=1, valid=2, test=3).items():
+        for label, array in arrays.items():
+            array   = zarr.array(array[samples == value], dtype='u1')
+            shape   = (array.shape[0], len(images), *array.shape[1:])
+            dataset = f'{paths.data}/{params.city}/zarr/{label}_{subsample}.zarr'
+            dataset = zarr.open(dataset, mode='a', shape=shape, dtype='u1')
+            dataset[:,i] = array
+            del array, shape, dataset
+    del arrays

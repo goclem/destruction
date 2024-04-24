@@ -16,6 +16,7 @@ import numpy as np
 import os
 import rasterio
 import re
+import shutil
 import torch
 
 from matplotlib import pyplot
@@ -55,6 +56,16 @@ def extract(files:list, pattern:str=r'\d{4}-\d{2}-\d{2}') -> list:
     regex = re.compile(pattern)
     match = np.array([regex.search(file).group() for file in files])
     return match
+
+def reset_folder(path:str, remove:bool=False) -> None:
+    '''Resets a folder'''
+    if remove:
+        if os.path.exists(path):
+            shutil.rmtree(path)
+        os.mkdir(path)
+    else:
+        if not os.path.exists(path):
+            os.mkdir(path)
 
 #%% RASTER UTILITIES
 
@@ -133,6 +144,16 @@ def image_to_tiles(image:torch.Tensor, tile_size:int, stride:int=None) -> torch.
     tiles = tiles.permute(1, 2, 0, 3, 4)
     tiles = tiles.contiguous().view(-1, depth, tile_size, tile_size)
     return tiles
+
+def load_sequences(files:list, tile_size:int, window:int=None, stride:int=None) -> torch.Tensor:
+    '''Loads a sequence of rasters as a tensor of tiles'''
+    if window is not None:
+        window = center_window(source=files[0], size=(window*tile_size, window*tile_size))
+    sequences = [read_raster(file, window=window, dtype='uint8') for file in files]
+    sequences = [torch.tensor(image).permute(2, 0, 1) for image in sequences]
+    sequences = [image_to_tiles(image, tile_size=tile_size, stride=stride) for image in sequences]
+    sequences = torch.stack(sequences).swapaxes(1, 0)
+    return sequences
 
 def sample_split(images:np.ndarray, samples:np.ndarray) -> list:
     '''Splits the data structure into multiple samples'''
