@@ -6,6 +6,14 @@
 - **Dominik**: Artemisa implementation
 - Format with fast block reading and in-place shuffling
 
+## Experimentations
+
+**Destruction labels**
+
+- Destroyed 3 -> 0.83 test accuracy
+- Destroyed 2, 3 -> 90.18 test accuracy
+- Destroyed 1, 2, 3 -> 91.75 test accuracy
+
 ## Proposed changes
 
 **Approach**

@@ -25,7 +25,7 @@ params = argparse.Namespace(
     tile_size=128, 
     grid_size=20, 
     batch_size=16, 
-    mapping={'0':0, '1':0, '2':0, '3':1, '255':255})
+    mapping={'0':0, '1':1, '2':1, '3':1, '255':255}) #! Choose
 
 #%% READS DATA
 
