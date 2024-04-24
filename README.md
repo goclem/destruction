@@ -65,4 +65,8 @@
 - [BigEarthNet](https://git.tu-berlin.de/rsim/BigEarthNet-S2_19-classes_models)
 - [SatlasPretrain](https://github.com/allenai/satlaspretrain_models?tab=readme-ov-file)
 - [PRESTO](https://arxiv.org/pdf/2304.14065.pdf)
-- [SITS-Former](https://www.sciencedirect.com/science/article/pii/S0303243421003585 https://www.conflict-ecology.org/research)
+- [SITS-Former](https://www.sciencedirect.com/science/article/pii/S0303243421003585)
+
+**Other**
+
+- [Conflict Ecology Lab](https://www.conflict-ecology.org/research)
