@@ -43,9 +43,10 @@ class ZarrDataset(utils.data.Dataset):
         return X, Y
 
 class ZarrDataLoader:
-    def __init__(self, datasets, batch_size:int=16):
+    def __init__(self, datasets, batch_size:int=16, pad_value:int=255):
         self.datasets    = datasets
         self.batch_size  = batch_size
+        self.pad_value   = pad_value
         self.slice_sizes = None
         self.n_batches   = None
         self.compute_slice_sizes()
@@ -58,10 +59,10 @@ class ZarrDataLoader:
     def __iter__(self):
         data_loaders = [utils.data.DataLoader(dataset, batch_size=int(slice_size)) for dataset, slice_size in zip(self.datasets, self.slice_sizes)]
         for batch in zip(*data_loaders):
-            max_size = max([subsample[0].size(1) for subsample in batch])
-            images   = torch.cat([nn.functional.pad(data[0], pad=(0, 0, 0, 0, 0, 0, 0, max_size - data[0].size(1), 0, 0), value=255) for data in batch])
-            labels   = torch.cat([nn.functional.pad(data[1], pad=(0, 0, 0, max_size - data[1].size(1), 0, 0), value=255) for data in batch])
-            indices  = torch.randperm(images.size(0))
+            n_times = max([data[0].size(1) for data in batch])
+            images  = torch.cat([nn.functional.pad(data[0], pad=(0, 0, 0, 0, 0, 0, 0, n_times - data[0].size(1), 0, 0), value=self.pad_value) for data in batch])
+            labels  = torch.cat([nn.functional.pad(data[1], pad=(0, 0, 0, n_times - data[1].size(1), 0, 0), value=self.pad_value) for data in batch])
+            indices = torch.randperm(images.size(0))
             yield images[indices], labels[indices]
 
     def __len__(self):
