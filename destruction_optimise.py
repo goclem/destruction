@@ -65,9 +65,9 @@ test_loader = ZarrDataset(
     mapping=params.mapping)
 
 #! Check num_workers
-train_loader = utils.data.DataLoader(train_loader, batch_size=params.batch_size, shuffle=True)
-valid_loader = utils.data.DataLoader(valid_loader, batch_size=params.batch_size, shuffle=True)
-test_loader  = utils.data.DataLoader(test_loader,  batch_size=params.batch_size, shuffle=True)
+train_loader = utils.data.DataLoader(train_loader, batch_size=params.batch_size, shuffle=False)
+valid_loader = utils.data.DataLoader(valid_loader, batch_size=params.batch_size, shuffle=False)
+test_loader  = utils.data.DataLoader(test_loader,  batch_size=params.batch_size, shuffle=False)
 
 ''' Checks data loaders
 X, Y = next(iter(train_loader))
@@ -118,6 +118,25 @@ model.image_encoder = set_trainable(model.image_encoder, True)
 optimiser = optim.AdamW(model.parameters(), lr=1e-5)
 count_parameters(model)
 '''
+
+def train(model:nn.module, train_loader, valid_loader, device:torch.device, criterion, optimiser, n_epochs:int=1, patience:int=1, accumulate:int=1, path:str=paths.models):
+    '''Trains a model using a training and validation sample'''
+    best_loss, counter = torch.tensor(float('inf')), 0
+    for epoch in range(n_epochs):
+        print_epoch(i_epoch=epoch, n_epochs=n_epochs)
+        train_loss = optimise(model=model, loader=train_loader, device=device, criterion=criterion, optimiser=optimiser, accumulate=accumulate)
+        # Early stopping
+        valid_loss = validate(model=model, loader=valid_loader, device=device, criterion=criterion)
+        if valid_loss < best_loss:
+            best_loss = valid_loss
+            counter = 0
+            torch.save(model, f'{path}/{model.__class__.__name__}_best.pth')
+        else:
+            counter += 1
+            if counter >= patience:
+                print('- Early stopping')
+                return model
+                break
 
 # Loss function
 criterion = BceLoss(focal=False, drop_nan=True)

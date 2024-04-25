@@ -2,9 +2,8 @@
 
 ## Todo
 
-- **Clement**: Sharing code on GitHub
-- **Dominik**: Artemisa implementation
-- Format with fast block reading and in-place shuffling
+- Artemisa implementation (Dominik)
+- Multi-city training (Clément)
 
 ## Experimentations
 
@@ -13,6 +12,10 @@
 - Destroyed 3 -> 0.83 test accuracy
 - Destroyed 2, 3 -> 90.18 test accuracy
 - Destroyed 1, 2, 3 -> 91.75 test accuracy
+
+**Subsamples**
+
+- Keeping the sequences with some destruction -> 0.95 test accuracy
 
 ## Proposed changes
 

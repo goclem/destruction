@@ -239,24 +239,6 @@ def empty_cache(device:torch.device):
     if device == 'mps':
         torch.mps.empty_cache()
 
-class BceLoss(nn.Module):
-    def __init__(self, focal:bool=True, drop_nan:bool=True, alpha:float=0.25, gamma:int=2):
-        super().__init__()
-        self.focal = focal
-        self.drop_nan = drop_nan
-        self.alpha = alpha
-        self.gamma = gamma
-
-    def forward(self, inputs:torch.Tensor, targets:torch.Tensor) -> torch.Tensor:
-        subset = torch.ones(targets.size(), dtype=torch.bool)
-        if self.drop_nan:
-            subset = ~torch.isnan(targets)
-        loss = nn.functional.binary_cross_entropy(inputs[subset], targets[subset], reduction='none')
-        if self.focal:
-            loss = self.alpha * (1 - torch.exp(-loss))**self.gamma * loss
-        loss = torch.mean(loss)
-        return loss
-
 def print_statistics(i_batch:int, n_batches:int, running_loss:torch.Tensor, n_obs:int, n_correct:int, label:str, print_format:str=f'02') -> None:
     '''Prints the current statistics of a batch'''
     end_print = '\r' if i_batch+1 < n_batches else '\n'
@@ -310,25 +292,6 @@ def validate(model, loader, device:torch.device, criterion, threshold:float=0.5)
             print_statistics(i_batch=i, n_batches=len(loader), running_loss=running_loss, n_obs=n_obs, n_correct=n_correct, label='Validation')
         return running_loss / n_obs
 
-def train(model, train_loader, valid_loader, device:torch.device, criterion, optimiser, n_epochs:int=1, patience:int=1, accumulate:int=1, path=paths.models):
-    '''Trains a model using a training and validation sample'''
-    best_loss, counter = torch.tensor(float('inf')), 0
-    for epoch in range(n_epochs):
-        print_epoch(i_epoch=epoch, n_epochs=n_epochs)
-        train_loss = optimise(model=model, loader=train_loader, device=device, criterion=criterion, optimiser=optimiser, accumulate=accumulate)
-        # Early stopping
-        valid_loss = validate(model=model, loader=valid_loader, device=device, criterion=criterion)
-        if valid_loss < best_loss:
-            best_loss = valid_loss
-            counter = 0
-            torch.save(model, f'{path}/{model.__class__.__name__}_best.pth')
-        else:
-            counter += 1
-            if counter >= patience:
-                print('- Early stopping')
-                return model
-                break
-
 def predict(model, loader, device:torch.device):
     '''Predicts the labels of a sample'''
     print_format = len(str(len(loader)))
@@ -342,4 +305,23 @@ def predict(model, loader, device:torch.device):
     Ys  = torch.cat(Ys)
     Yhs = torch.cat(Yhs)
     return Ys, Yhs
+
+class BceLoss(nn.Module):
+    '''Binary cross-entropy loss with optional focal loss'''
+    def __init__(self, focal:bool=True, drop_nan:bool=True, alpha:float=0.25, gamma:int=2):
+        super().__init__()
+        self.focal = focal
+        self.drop_nan = drop_nan
+        self.alpha = alpha
+        self.gamma = gamma
+
+    def forward(self, inputs:torch.Tensor, targets:torch.Tensor) -> torch.Tensor:
+        subset = torch.ones(targets.size(), dtype=torch.bool)
+        if self.drop_nan:
+            subset = ~torch.isnan(targets)
+        loss = nn.functional.binary_cross_entropy(inputs[subset], targets[subset], reduction='none')
+        if self.focal:
+            loss = self.alpha * (1 - torch.exp(-loss))**self.gamma * loss
+        loss = torch.mean(loss)
+        return loss
 # %%
