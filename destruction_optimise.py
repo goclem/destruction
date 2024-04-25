@@ -22,57 +22,70 @@ from sklearn import metrics
 # Utilities
 device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
 params = argparse.Namespace(
+    cities=['aleppo', 'rakka'],
     tile_size=128, 
     grid_size=20, 
     batch_size=16, 
-    mapping={0:0, 1:1, 2:1, 3:1, 255:torch.tensor(float('nan'))}) #! Choose
+    label_map={0:0, 1:1, 2:1, 3:1, 255:torch.tensor(float('nan'))})
 
 #%% INITIALISES DATA LOADERS
 
 class ZarrDataset(utils.data.Dataset):
     '''Zarr dataset for PyTorch'''
-    def __init__(self, images_zarr:str, labels_zarr:str, mapping:dict=None):
-        self.images  = zarr.open(images_zarr, mode='r')
-        self.labels  = zarr.open(labels_zarr, mode='r')
-        self.mapping = mapping
-        self.length  = len(self.images)
+    def __init__(self, images_zarr:str, labels_zarr:str):
+        self.images = zarr.open(images_zarr, mode='r')
+        self.labels = zarr.open(labels_zarr, mode='r')
+        self.length = len(self.images)
     
     def __len__(self):
         return self.length
     
     def __getitem__(self, idx):
-        # Read data from the Zarr dataset at the specified index
-        X = torch.from_numpy(self.images[idx]).float()
-        Y = torch.from_numpy(self.labels[idx]).float()
-        X = torch.div(X, 255)
-        if self.mapping is not None:
-            Y.apply_(lambda y: self.mapping.get(y, y))
+        X = torch.from_numpy(self.images[idx])
+        Y = torch.from_numpy(self.labels[idx])
         return X, Y
+
+class ZarrDataLoader:
+    def __init__(self, datasets:list, label_map:dict, batch_size:int):
+        self.datasets    = datasets
+        self.batch_size  = batch_size
+        self.label_map   = label_map
+        self.slice_sizes = None
+        self.n_batches   = None
+        self.compute_slice_sizes()
+
+    def compute_slice_sizes(self):
+        dataset_sizes    = torch.tensor([len(dataset) for dataset in self.datasets])
+        self.slice_sizes = (dataset_sizes / dataset_sizes.sum() * self.batch_size).round().int()
+        self.n_batches   = (dataset_sizes // self.slice_sizes).min()
     
-def init_loader(images_zarr:str, labels_zarr:str, mapping:dict):
-    train_loader = ZarrDataset(
-    images=f'{paths.data}/aleppo/zarr/images_train.zarr',
-    labels=f'{paths.data}/aleppo/zarr/labels_train.zarr',
-    mapping=params.mapping)
+    def pad_sequence(self, sequence:torch.Tensor, value:int, dim:int=1, T:int=25) -> torch.Tensor:
+        pad = torch.zeros(2*len(sequence.size()), dtype=int)
+        pad = pad.index_fill(0, torch.tensor(2*dim), T-sequence.size(dim)).flip(0).tolist()
+        pad = nn.functional.pad(sequence, pad=pad, value=value)
+        return pad
 
-train_loader = ZarrDataset(
-    images=f'{paths.data}/aleppo/zarr/images_train.zarr',
-    labels=f'{paths.data}/aleppo/zarr/labels_train.zarr',
-    mapping=params.mapping)
+    def __iter__(self):
+        data_loaders = [utils.data.DataLoader(dataset, batch_size=int(slice_size)) for dataset, slice_size in zip(self.datasets, self.slice_sizes)]
+        for batch in zip(*data_loaders):
+            T = max([data[0].size(1) for data in batch])
+            X = torch.cat([self.pad_sequence(data[0], value=0,   T=T, dim=1) for data in batch])
+            Y = torch.cat([self.pad_sequence(data[1], value=255, T=T, dim=1) for data in batch])
+            X = torch.div(X.float(), 255)
+            for key, value in self.label_map.items():
+                Y = torch.where(Y == key, value, Y)
+            idx = torch.randperm(X.size(0))
+            yield X[idx], Y[idx]
 
-valid_loader = ZarrDataset(
-    images=f'{paths.data}/aleppo/zarr/images_valid.zarr',
-    labels=f'{paths.data}/aleppo/zarr/labels_valid.zarr',
-    mapping=params.mapping)
+    def __len__(self):
+        return self.n_batches
 
-test_loader = ZarrDataset(
-    images=f'{paths.data}/aleppo/zarr/images_test.zarr',
-    labels=f'{paths.data}/aleppo/zarr/labels_test.zarr',
-    mapping=params.mapping)
-
-train_loader = utils.data.DataLoader(train_loader, batch_size=params.batch_size, shuffle=False)
-valid_loader = utils.data.DataLoader(valid_loader, batch_size=params.batch_size, shuffle=False)
-test_loader  = utils.data.DataLoader(test_loader,  batch_size=params.batch_size, shuffle=False)
+train_loader = [ZarrDataset(f'{paths.data}/{city}/zarr/images_train.zarr', f'{paths.data}/{city}/zarr/labels_train.zarr') for city in params.cities]
+valid_loader = [ZarrDataset(f'{paths.data}/{city}/zarr/images_valid.zarr', f'{paths.data}/{city}/zarr/labels_valid.zarr') for city in params.cities]
+test_loader  = [ZarrDataset(f'{paths.data}/{city}/zarr/images_test.zarr',  f'{paths.data}/{city}/zarr/labels_test.zarr')  for city in params.cities]
+train_loader = ZarrDataLoader(train_loader, batch_size=params.batch_size, label_map=params.label_map)
+valid_loader = ZarrDataLoader(valid_loader, batch_size=params.batch_size, label_map=params.label_map)
+test_loader  = ZarrDataLoader(test_loader,  batch_size=params.batch_size, label_map=params.label_map)
 
 ''' Checks data loaders
 X, Y = next(iter(train_loader))
@@ -110,21 +123,22 @@ del image_encoder, sequence_encoder, prediction_head
 
 #%% OPTIMISATION
 
-#? Loads previous checkpoint
+''' #? Loads previous checkpoint
 model = torch.load(f'{paths.models}/ModelWrapper_best.pth')
+'''
 
 #? Parameter alignment i.e. freezes image encoder's parameters
-model.image_encoder = set_trainable(model.image_encoder, False)
-optimiser = optim.AdamW(model.parameters(), lr=1e-4)
+set_trainable(model.image_encoder, False)
 count_parameters(model)
+optimiser = optim.AdamW(model.parameters(), lr=1e-4)
 
 ''' #? Fine tuning i.e. unfreezes image encoder's parameters
-model.image_encoder = set_trainable(model.image_encoder, True)
+set_trainable(model.image_encoder, True)
 optimiser = optim.AdamW(model.parameters(), lr=1e-5)
 count_parameters(model)
 '''
 
-def train(model:nn.module, train_loader, valid_loader, device:torch.device, criterion, optimiser, n_epochs:int=1, patience:int=1, accumulate:int=1, path:str=paths.models):
+def train(model:nn.Module, train_loader, valid_loader, device:torch.device, criterion, optimiser, n_epochs:int=1, patience:int=1, accumulate:int=1, path:str=paths.models):
     '''Trains a model using a training and validation sample'''
     best_loss, counter = torch.tensor(float('inf')), 0
     for epoch in range(n_epochs):

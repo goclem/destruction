@@ -105,7 +105,7 @@ class ModelWrapper(nn.Module):
 
 '''
 # Initialises model components
-image_encoder    = torch.load(path.join(paths.models, 'Aerial_SwinB_SI.pth'))
+image_encoder    = torch.load(f'{paths.models}/Aerial_SwinB_SI.pth')
 image_encoder    = ImageEncoder(image_encoder)
 sequence_encoder = dict(input_dim=512, max_length=25, n_heads=4, hidden_dim=512, n_layers=4, dropout=0.0)
 sequence_encoder = SequenceEncoder(**sequence_encoder)
@@ -120,15 +120,24 @@ count_parameters(model.prediction_head)
 
 # Loads batch
 X, Y = next(iter(train_loader))
+print(X.size(), Y.size())
 display_sequence(X[0], Y[0], grid_size=(5,5))
 
-# Tests model components
+# Tests model components CPU
 with torch.no_grad():
     H = image_encoder(X)
     H = sequence_encoder(H)
     Y = prediction_head(H)
 
+# Tests model components GPU
+model.to(device)
+with torch.no_grad():
+    H = model.image_encoder(X.to(device))
+    H = model.sequence_encoder(H)
+    H = model.layer_norm(H)
+    Y = model.prediction_head(H)
+
 # Tests full model
 with torch.no_grad():
-    Y = model(X)
+    Y = model(X.to(device))
 '''
