@@ -117,7 +117,7 @@ del images, labels, samples
 #%% SUBSETS ZARR DATASETS
 
 #! Keeps only the samples with destruction
-for sample in ['train', 'valid', 'test']:
+for sample in ['train', 'valid']:
     print(f'Processing {sample} sample')
     # Define paths
     images_zarr = f'{paths.data}/{params.city}/zarr/images_{sample}.zarr'

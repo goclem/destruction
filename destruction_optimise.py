@@ -167,13 +167,17 @@ empty_cache(device)
 
 #%% ESTIMATES THRESHOLD
 
+def compute_threshold(model:nn.Module, loader, device:torch.device) -> float:
+    Y, Yh  = predict(model, loader=train_loader, device=device)
+    subset = ~Y.isnan()
+    precision, recall, threshold = metrics.precision_recall_curve(Y[subset].cpu(), Yh[subset].cpu())
+    fscore    = (2 * precision * recall) / (precision + recall)
+    threshold = threshold[np.argmax(fscore)]
+    return threshold
+
 # Threshold estimation
-Y, Yh  = predict(model, loader=train_loader, device=device)
-subset = ~Y.isnan()
-precision, recall, threshold = metrics.precision_recall_curve(Y[subset].cpu(), Yh[subset].cpu())
-fscore    = (2 * precision * recall) / (precision + recall)
-threshold = threshold[np.argmax(fscore)]
-del Y, Yh, subset, precision, recall, fscore
+threshold = compute_threshold(model=model, loader=train_loader, device=device)
+print(f'Threshold: {threshold:.2f}')
 
 # Testing
 validate(model=model, loader=test_loader, device=device, criterion=criterion, threshold=threshold)
