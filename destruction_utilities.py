@@ -239,15 +239,10 @@ def empty_cache(device:torch.device):
     if device == 'mps':
         torch.mps.empty_cache()
 
-def print_statistics(i_batch:int, n_batches:int, running_loss:torch.Tensor, n_obs:int, n_correct:int, label:str, print_format:str=f'02') -> None:
+def print_statistics(batch:int, n_batches:int, running_loss:torch.Tensor, n_obs:int, n_correct:int, label:str) -> None:
     '''Prints the current statistics of a batch'''
-    end_print = '\r' if i_batch+1 < n_batches else '\n'
-    print(f'{label: <10} | Batch {i_batch+1:{print_format}d}/{n_batches:{print_format}d} | Loss {running_loss / n_obs:.4f} | Accuracy {n_correct / n_obs:.4f}', end=end_print)
-
-def print_epoch(i_epoch:int, n_epochs:int) -> None:
-    '''Prints the current epoch'''
-    print_format = f'0{len(str(n_epochs))}'
-    print(f'Epoch {i_epoch+1:{print_format}d}/{n_epochs}')
+    end_print = {'\r' if batch+1 < n_batches else '\n'}
+    print(f'{label: <10} | Batch {batch+1:03d}/{n_batches:03d} | Loss {running_loss / n_obs:.4f} | Accuracy {n_correct / n_obs:.4f}', end=end_print)
 
 def optimise(model:nn.Module, loader, device:torch.device, criterion, optimiser, accumulate:int=1):
     '''Optimises a model using a training sample for one epoch'''
@@ -272,7 +267,7 @@ def optimise(model:nn.Module, loader, device:torch.device, criterion, optimiser,
         n_obs += torch.sum(subset)
         n_correct += (Yh[subset].round() == Y[subset]).sum().item()
         running_loss += (loss * torch.sum(subset)).item()
-        print_statistics(i_batch=i, n_batches=len(loader), running_loss=running_loss, n_obs=n_obs, n_correct=n_correct, label='Training')
+        print_statistics(batch=i, n_batches=len(loader), running_loss=running_loss, n_obs=n_obs, n_correct=n_correct, label='Training')
     return running_loss / n_obs
 
 def validate(model, loader, device:torch.device, criterion, threshold:float=0.5):
@@ -289,7 +284,7 @@ def validate(model, loader, device:torch.device, criterion, threshold:float=0.5)
             n_obs += torch.sum(subset)
             n_correct += ((Yh[subset] > threshold).float() == Y[subset]).sum().item()
             running_loss += (loss * torch.sum(subset)).item()
-            print_statistics(i_batch=i, n_batches=len(loader), running_loss=running_loss, n_obs=n_obs, n_correct=n_correct, label='Validation')
+            print_statistics(batch=i, n_batches=len(loader), running_loss=running_loss, n_obs=n_obs, n_correct=n_correct, label='Validation')
         return running_loss / n_obs
 
 def predict(model, loader, device:torch.device):

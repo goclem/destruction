@@ -31,9 +31,9 @@ params = argparse.Namespace(
 
 class ZarrDataset(utils.data.Dataset):
     '''Zarr dataset for PyTorch'''
-    def __init__(self, images:str, labels:str, mapping:str=None):
-        self.images  = zarr.open(images, mode='r')
-        self.labels  = zarr.open(labels, mode='r')
+    def __init__(self, images_zarr:str, labels_zarr:str, mapping:dict=None):
+        self.images  = zarr.open(images_zarr, mode='r')
+        self.labels  = zarr.open(labels_zarr, mode='r')
         self.mapping = mapping
         self.length  = len(self.images)
     
@@ -48,6 +48,12 @@ class ZarrDataset(utils.data.Dataset):
         if self.mapping is not None:
             Y.apply_(lambda y: self.mapping.get(y, y))
         return X, Y
+    
+def init_loader(images_zarr:str, labels_zarr:str, mapping:dict):
+    train_loader = ZarrDataset(
+    images=f'{paths.data}/aleppo/zarr/images_train.zarr',
+    labels=f'{paths.data}/aleppo/zarr/labels_train.zarr',
+    mapping=params.mapping)
 
 train_loader = ZarrDataset(
     images=f'{paths.data}/aleppo/zarr/images_train.zarr',
@@ -64,7 +70,6 @@ test_loader = ZarrDataset(
     labels=f'{paths.data}/aleppo/zarr/labels_test.zarr',
     mapping=params.mapping)
 
-#! Check num_workers
 train_loader = utils.data.DataLoader(train_loader, batch_size=params.batch_size, shuffle=False)
 valid_loader = utils.data.DataLoader(valid_loader, batch_size=params.batch_size, shuffle=False)
 test_loader  = utils.data.DataLoader(test_loader,  batch_size=params.batch_size, shuffle=False)
@@ -123,7 +128,7 @@ def train(model:nn.module, train_loader, valid_loader, device:torch.device, crit
     '''Trains a model using a training and validation sample'''
     best_loss, counter = torch.tensor(float('inf')), 0
     for epoch in range(n_epochs):
-        print_epoch(i_epoch=epoch, n_epochs=n_epochs)
+        print(f'Epoch {epoch+1:03d}/{n_epochs:03d}')
         train_loss = optimise(model=model, loader=train_loader, device=device, criterion=criterion, optimiser=optimiser, accumulate=accumulate)
         # Early stopping
         valid_loss = validate(model=model, loader=valid_loader, device=device, criterion=criterion)
@@ -139,7 +144,7 @@ def train(model:nn.module, train_loader, valid_loader, device:torch.device, crit
                 break
 
 # Loss function
-criterion = BceLoss(focal=False, drop_nan=True)
+criterion = BceLoss(focal=True, drop_nan=True)
 
 # Training
 train(model=model, 

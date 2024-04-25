@@ -1,57 +1,65 @@
 # Destruction project
 
-## Todo
+## To do
 
-- Artemisa implementation (Dominik)
-- Multi-city training (Clément)
+1. Artemisa implementation (Dominik)
+2. Multi-city training (Clément)
+3. Efficient shuffling on epoch end (Clément)
 
-## Experimentations
+## Experiments
+
+Experiments performed on Aleppo
 
 **Destruction labels**
 
-- Destroyed 3 -> 0.83 test accuracy
-- Destroyed 2, 3 -> 90.18 test accuracy
-- Destroyed 1, 2, 3 -> 91.75 test accuracy
+| Destroyed | Test Accuracy |
+|-----------|---------------|
+| 3         | 83.00         |
+| 2, 3      | 90.18         |
+| 1, 2, 3   | 91.75         |
 
 **Subsamples**
 
-- Keeping the sequences with some destruction -> 0.95 test accuracy
+- Keeping the sequences with some destruction &rarr; 0.95 test accuracy
+
+**Focal loss**
+
+- In progress
 
 ## Proposed changes
 
-**Approach**
+**Model**
 
-- Separate image encoder (foundation model) and sequence encoder
-- Combined into a single model
-- Predictions use all pre-images with or without labels
-- Better domain transfer (e.g. trained on snow)
-- Model in PyTorch (i.e more control)
-
-**Image encoder**
-
-- Extract features from individual images at different scales
-- Pre-trained ViT (i.e. SatlasPretrain)
-- Fine-tuning using contrastive loss?
-
-**Sequence encoder**
-
-- Transformer encoder
-- Processes sequences of varying lengths in parallel
-- Captures temporal dependence between images and labels
-- Multi-head attention using causal mask
+- PyTorch implementation, more training control
+- Modular architecture with independent components 
+	- Image encoder (n x t x d x h x w &rarr; n x t x k)
+	- Sequence encoder (n x t x k  &rarr; n x t x k)
+	- Classification head (n x t x k &rarr; n x t x 1)
+- Pre-trained foundation model (i.e. SatlasPretrain) as image encoder
+	- Domain transfer for HR aerial images (e.g. trained on snow)
+	- Extract images features at different scales
+	- Decreased computational cost, fine-tuning optionnal
+- Transformer as sequence encoder
+	- Processes sequences of varying lengths
+	- Captures temporal dependence between images and labels
+	- Multi-head attention using causal mask
 
 **Optimisation**
 
-- Masked cross-entropy loss using only the non-missing labels
+- Masked focal cross-entropy 
+	- Training using entire image sequences and the non-missing labels
+	- Manages class imbalances and weights difficult examples
 - Gradient accumulation to stabilise training
-- Use model checkpoints rather than train from scratch
+- Model checkpoints to avoid training from scratch
 
 **Data & loaders**
 
-- Format with fast block reading and in-place shuffling
-- Saving three files per city containing the train, test, and validation sequences
-- Need labels at the same resolution as the image
-- Augmentation using subsets of sequences
+- One zarr file per
+	- City e.g. Aleppo
+	- Sample i.e. train, valid, test
+	- Dataset i.e. images, labels
+- Shuffle cities on epoch end
+- Data loader using from multiple city datasets
 
 **Predictions**
 
