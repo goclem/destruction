@@ -24,7 +24,7 @@ Experiments performed on Aleppo
 
 **Focal loss**
 
-- In progress
+- Focal loss + subsampling &rarr; decision threshold 0.5
 
 ## Proposed changes
 
