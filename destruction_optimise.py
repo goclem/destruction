@@ -144,7 +144,7 @@ def train(model:nn.module, train_loader, valid_loader, device:torch.device, crit
                 break
 
 # Loss function
-criterion = BceLoss(focal=True, drop_nan=True)
+criterion = BceLoss(focal=True, drop_nan=True, alpha=0.25, gamma=2.0)
 
 # Training
 train(model=model, 

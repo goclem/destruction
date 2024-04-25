@@ -303,12 +303,12 @@ def predict(model, loader, device:torch.device):
 
 class BceLoss(nn.Module):
     '''Binary cross-entropy loss with optional focal loss'''
-    def __init__(self, focal:bool=True, drop_nan:bool=True, alpha:float=0.25, gamma:int=2):
+    def __init__(self, focal:bool=True, drop_nan:bool=True, alpha:float=0.25, gamma:float=2.0):
         super().__init__()
-        self.focal = focal
+        self.focal    = focal
         self.drop_nan = drop_nan
-        self.alpha = alpha
-        self.gamma = gamma
+        self.alpha    = alpha
+        self.gamma    = gamma
 
     def forward(self, inputs:torch.Tensor, targets:torch.Tensor) -> torch.Tensor:
         subset = torch.ones(targets.size(), dtype=torch.bool)
@@ -319,4 +319,5 @@ class BceLoss(nn.Module):
             loss = self.alpha * (1 - torch.exp(-loss))**self.gamma * loss
         loss = torch.mean(loss)
         return loss
-# %%
+
+#%%
