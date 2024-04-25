@@ -64,9 +64,10 @@ test_loader = ZarrDataset(
     labels=f'{paths.data}/aleppo/zarr/labels_test.zarr',
     mapping=params.mapping)
 
-train_loader = utils.data.DataLoader(train_loader, batch_size=params.batch_size)
-valid_loader = utils.data.DataLoader(valid_loader, batch_size=params.batch_size)
-test_loader  = utils.data.DataLoader(test_loader,  batch_size=params.batch_size)
+#! Check num_workers
+train_loader = utils.data.DataLoader(train_loader, batch_size=params.batch_size, shuffle=True)
+valid_loader = utils.data.DataLoader(valid_loader, batch_size=params.batch_size, shuffle=True)
+test_loader  = utils.data.DataLoader(test_loader,  batch_size=params.batch_size, shuffle=True)
 
 ''' Checks data loaders
 X, Y = next(iter(train_loader))

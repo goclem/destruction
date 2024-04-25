@@ -82,7 +82,7 @@ for date in dates:
     write_raster(array=subset, profile=profile, destination=f'{paths.data}/{params.city}/labels/label_{date}.tif')
 del dates, date, subset
 
-#%% WRITES ZARR DATASETS
+#%% CREATES ZARR DATASETS
 
 ''' #! Removes existing zarr
 reset_folder(f'{paths.data}/{params.city}/zarr', remove=True)
@@ -113,3 +113,28 @@ for i, (image, label) in enumerate(zip(images, labels)):
     del image, label, arrays
 
 del images, labels, samples
+
+#%% SUBSETS ZARR DATASETS
+
+#! Keeps only the samples with destruction
+for sample in ['train', 'valid', 'test']:
+    print(f'Processing {sample} sample')
+    # Define paths
+    images_zarr = f'{paths.data}/{params.city}/zarr/images_{sample}.zarr'
+    labels_zarr = f'{paths.data}/{params.city}/zarr/labels_{sample}.zarr'
+    # Loads data
+    images = zarr.open(images_zarr, mode='r')[:]
+    labels = zarr.open(labels_zarr, mode='r')[:]
+    # Subsets datasets
+    subset = (np.sum(np.isin(labels, [1,2,3]), axis=1) > 0).flatten()
+    images = images[subset]
+    labels = labels[subset]
+    # Writes data
+    dataset = zarr.open(images_zarr, shape=images.shape, dtype=images.dtype, mode='w')
+    dataset[:] = images
+    dataset = zarr.open(labels_zarr, shape=labels.shape, dtype=labels.dtype, mode='w')
+    dataset[:] = labels
+    # Shuffles datasets
+    shuffle_zarr(images_zarr, labels_zarr)
+    del images_zarr, labels_zarr, images, labels, subset, dataset
+

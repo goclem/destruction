@@ -167,9 +167,11 @@ def to_numpy(tensor:torch.Tensor):
 
 #%% DISPLAY UTILITIES
     
-def display(image:torch.Tensor, title:str='', cmap:str='gray') -> None:
+def display(image:torch.Tensor, title:str='', cmap:str='gray', channel_first:bool=True) -> None:
     '''Displays an image'''
-    if isinstance(image, torch.Tensor):
+    if isinstance(images, np.ndarray):
+        image = torch.from_numpy(image)
+    if channel_first:
         image = image.permute(1, 2, 0)
     fig, ax = pyplot.subplots(1, figsize=(10, 10))
     ax.imshow(image, cmap=cmap)
@@ -178,9 +180,12 @@ def display(image:torch.Tensor, title:str='', cmap:str='gray') -> None:
     pyplot.tight_layout()
     pyplot.show()
 
-def display_sequence(images:torch.Tensor, titles:list=None, grid_size:tuple=None) -> None:
+def display_sequence(images:torch.Tensor, titles:list=None, grid_size:tuple=None, channel_first:bool=True) -> None:
     '''Displays a grid of images'''
-    images = images.permute(0, 2, 3, 1)
+    if isinstance(images, np.ndarray):
+        images = torch.from_numpy(images)
+    if channel_first:
+        images = images.permute(0, 2, 3, 1)
     if grid_size is None: grid_size = (1, images.size(0))
     if titles is None: titles = [None] * images.size(0)
     if isinstance(titles, torch.Tensor): titles = titles.tolist()
@@ -194,7 +199,23 @@ def display_sequence(images:torch.Tensor, titles:list=None, grid_size:tuple=None
     pyplot.show()
 
 #%% TRAINING UTILITIES
-    
+
+def shuffle_zarr(images_zarr:str, labels_zarr:str) -> None:
+    '''Shuffles a Zarr array along the first axis'''
+    # Reads datasets
+    images = zarr.open(images_zarr, mode='r')[:]
+    labels = zarr.open(labels_zarr, mode='r')[:]
+    # Shfulle indices
+    indices = np.arange(len(images))
+    np.random.shuffle(indices)
+    images = images[indices]
+    labels = labels[indices]
+    # Writes datasets
+    dataset = zarr.open(images_zarr, shape=images.shape, dtype=images.dtype, mode='w')
+    dataset[:] = images
+    dataset = zarr.open(labels_zarr, shape=labels.shape, dtype=labels.dtype, mode='w')
+    dataset[:] = labels
+
 def count_parameters(model:nn.Module):
     '''Counts the number of parameters in a model'''
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
