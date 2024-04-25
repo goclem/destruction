@@ -111,7 +111,7 @@ def rasterise(source, profile, layer:str=None, varname:str=None, all_touched:boo
     image = np.expand_dims(image, 2)
     return image
 
-def center_window(source:str, size:dict):
+def center_window(source:str, size:dict) -> windows.Window:
     '''Computes the windows for the centre of a raster'''
     profile = rasterio.open(source).profile
     centre  = (profile['width'] // 2, profile['height'] // 2)
@@ -160,10 +160,6 @@ def sample_split(images:np.ndarray, samples:np.ndarray) -> list:
     '''Splits the data structure into multiple samples'''
     samples = [images[samples == value, ...] for value in np.unique(samples)]
     return samples
-
-def to_numpy(tensor:torch.Tensor):
-    '''Converts a tensor to a numpy array'''
-    return tensor.detach().cpu().numpy()
 
 #%% DISPLAY UTILITIES
     
@@ -216,13 +212,13 @@ def shuffle_zarr(images_zarr:str, labels_zarr:str) -> None:
     dataset = zarr.open(labels_zarr, shape=labels.shape, dtype=labels.dtype, mode='w')
     dataset[:] = labels
 
-def count_parameters(model:nn.Module):
+def count_parameters(model:nn.Module) -> None:
     '''Counts the number of parameters in a model'''
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     nontrain  = sum(p.numel() for p in model.parameters() if not p.requires_grad)
     print(f'Trainable parameters: {trainable:,} | Non-trainable parameters: {nontrain:,}')
 
-def set_trainable(model:nn.Module, trainable:bool):
+def set_trainable(model:nn.Module, trainable:bool) -> None:
     '''Sets the trainable status of a model'''
     for param in model.parameters():
         param.requires_grad = trainable
@@ -230,9 +226,8 @@ def set_trainable(model:nn.Module, trainable:bool):
         model.train()
     else:
         model.eval()
-    return model
 
-def empty_cache(device:torch.device):
+def empty_cache(device:torch.device) -> None:
     '''Empties the cache of a device'''
     if device == 'cuda':
         torch.cuda.empty_cache()
@@ -244,7 +239,7 @@ def print_statistics(batch:int, n_batches:int, running_loss:torch.Tensor, n_obs:
     end_print = {'\r' if batch+1 < n_batches else '\n'}
     print(f'{label: <10} | Batch {batch+1:03d}/{n_batches:03d} | Loss {running_loss / n_obs:.4f} | Accuracy {n_correct / n_obs:.4f}', end=end_print)
 
-def optimise(model:nn.Module, loader, device:torch.device, criterion, optimiser, accumulate:int=1):
+def optimise(model:nn.Module, loader, device:torch.device, criterion, optimiser, accumulate:int=1) -> torch.Tensor:
     '''Optimises a model using a training sample for one epoch'''
     model.train()
     n_correct, n_obs, running_loss = 0, 0, 0.0
@@ -270,7 +265,7 @@ def optimise(model:nn.Module, loader, device:torch.device, criterion, optimiser,
         print_statistics(batch=i, n_batches=len(loader), running_loss=running_loss, n_obs=n_obs, n_correct=n_correct, label='Training')
     return running_loss / n_obs
 
-def validate(model, loader, device:torch.device, criterion, threshold:float=0.5):
+def validate(model:nn.Module, loader, device:torch.device, criterion, threshold:float=0.5) -> torch.Tensor:
     '''Validates a model using a validation sample for one epoch'''
     model.eval()
     n_correct, n_obs, running_loss = 0, 0, 0.0
@@ -287,16 +282,15 @@ def validate(model, loader, device:torch.device, criterion, threshold:float=0.5)
             print_statistics(batch=i, n_batches=len(loader), running_loss=running_loss, n_obs=n_obs, n_correct=n_correct, label='Validation')
         return running_loss / n_obs
 
-def predict(model, loader, device:torch.device):
+def predict(model:nn.Module, loader, device:torch.device) -> tuple:
     '''Predicts the labels of a sample'''
-    print_format = len(str(len(loader)))
     model.eval()
     Ys, Yhs = [None]*len(loader), [None]*len(loader)
     with torch.no_grad():
         for i, (X, Y) in enumerate(loader):
             Ys[i]  = Y
             Yhs[i] = model(X.to(device))
-            print(f'Batch {i+1:{print_format}d}/{len(loader):{print_format}d}', end='\r')
+            print(f'Batch {i+1:03d}/{len(loader):03d}', end='\r')
     Ys  = torch.cat(Ys)
     Yhs = torch.cat(Yhs)
     return Ys, Yhs
