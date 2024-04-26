@@ -13,6 +13,7 @@ import numpy as np
 import geopandas as gpd
 import pandas as pd
 import rasterio
+import satlaspretrain_models
 import zarr
 
 from numpy import random
@@ -138,3 +139,9 @@ for sample in ['train', 'valid']:
     shuffle_zarr(images_zarr, labels_zarr)
     del images_zarr, labels_zarr, images, labels, subset, dataset
 
+#%% DOWNLOADS FEATURE EXTRACTOR
+
+feature_extractor = satlaspretrain_models.Weights()
+feature_extractor = feature_extractor.get_pretrained_model(model_identifier='Aerial_SwinB_SI', fpn=True, device='cpu')
+torch.save(feature_extractor, path.join(paths.models, 'Aerial_SwinB_SI.pth'))
+del feature_extractor

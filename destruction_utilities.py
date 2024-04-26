@@ -196,6 +196,76 @@ def display_sequence(images:torch.Tensor, titles:list=None, grid_size:tuple=None
 
 #%% TRAINING UTILITIES
 
+class ZarrDataset(utils.data.Dataset):
+    '''Zarr dataset for PyTorch'''
+    def __init__(self, images_zarr:str, labels_zarr:str):
+        self.images = zarr.open(images_zarr, mode='r')
+        self.labels = zarr.open(labels_zarr, mode='r')
+        self.length = len(self.images)
+    
+    def __len__(self):
+        return self.length
+    
+    def __getitem__(self, idx):
+        X = torch.from_numpy(self.images[idx])
+        Y = torch.from_numpy(self.labels[idx])
+        return X, Y
+
+class ZarrDataLoader:
+    '''Zarr data loader for PyTorch'''
+    def __init__(self, datasets:list, label_map:dict, batch_size:int):
+        self.datasets    = datasets
+        self.batch_size  = batch_size
+        self.label_map   = label_map
+        self.slice_sizes = None
+        self.n_batches   = None
+        self.compute_slice_sizes()
+
+    def compute_slice_sizes(self):
+        dataset_sizes    = torch.tensor([len(dataset) for dataset in self.datasets])
+        self.slice_sizes = (dataset_sizes / dataset_sizes.sum() * self.batch_size).round().int()
+        self.n_batches   = (dataset_sizes // self.slice_sizes).min()
+    
+    def pad_sequence(self, sequence:torch.Tensor, value:int, seq_len:int=None, dim:int=1) -> torch.Tensor:
+        pad = torch.zeros(2*len(sequence.size()), dtype=int)
+        pad = pad.index_fill(0, torch.tensor(2*dim), seq_len-sequence.size(dim)).flip(0).tolist()
+        pad = nn.functional.pad(sequence, pad=pad, value=value)
+        return pad
+
+    def __iter__(self):
+        data_loaders = [utils.data.DataLoader(dataset, batch_size=int(slice_size)) for dataset, slice_size in zip(self.datasets, self.slice_sizes)]
+        for batch in zip(*data_loaders):
+            seq_len = max([data[0].size(1) for data in batch])
+            X = torch.cat([self.pad_sequence(data[0], value=0,   seq_len=seq_len, dim=1) for data in batch])
+            Y = torch.cat([self.pad_sequence(data[1], value=255, seq_len=seq_len, dim=1) for data in batch])
+            X = torch.div(X.float(), 255)
+            for key, value in self.label_map.items():
+                Y = torch.where(Y == key, value, Y)
+            idx = torch.randperm(X.size(0))
+            yield X[idx], Y[idx]
+
+    def __len__(self):
+        return self.n_batches
+    
+class BceLoss(nn.Module):
+    '''Binary cross-entropy loss with optional focal loss'''
+    def __init__(self, focal:bool=True, drop_nan:bool=True, alpha:float=0.25, gamma:float=2.0):
+        super().__init__()
+        self.focal    = focal
+        self.drop_nan = drop_nan
+        self.alpha    = alpha
+        self.gamma    = gamma
+
+    def forward(self, inputs:torch.Tensor, targets:torch.Tensor) -> torch.Tensor:
+        subset = torch.ones(targets.size(), dtype=torch.bool)
+        if self.drop_nan:
+            subset = ~torch.isnan(targets)
+        loss = nn.functional.binary_cross_entropy(inputs[subset], targets[subset], reduction='none')
+        if self.focal:
+            loss = self.alpha * (1 - torch.exp(-loss))**self.gamma * loss
+        loss = torch.mean(loss)
+        return loss
+
 def shuffle_zarr(images_zarr:str, labels_zarr:str) -> None:
     '''Shuffles a Zarr array along the first axis'''
     # Reads datasets
@@ -234,15 +304,15 @@ def empty_cache(device:torch.device) -> None:
     if device == 'mps':
         torch.mps.empty_cache()
 
-def print_statistics(batch:int, n_batches:int, running_loss:torch.Tensor, n_obs:int, n_correct:int, label:str) -> None:
+def print_statistics(batch:int, n_batches:int, run_loss:torch.Tensor, n_obs:int, n_correct:int, label:str) -> None:
     '''Prints the current statistics of a batch'''
     end_print = '\r' if batch+1 < n_batches else '\n'
-    print(f'{label: <10} | Batch {batch+1:03d}/{n_batches:03d} | Loss {running_loss / n_obs:.4f} | Accuracy {n_correct / n_obs:.4f}', end=end_print)
+    print(f'{label: <10} | Batch {batch+1:03d}/{n_batches:03d} | Loss {run_loss / n_obs:.4f} | Accuracy {n_correct / n_obs:.4f}', end=end_print)
 
 def optimise(model:nn.Module, loader, device:torch.device, criterion, optimiser, accumulate:int=1) -> torch.Tensor:
     '''Optimises a model using a training sample for one epoch'''
     model.train()
-    n_correct, n_obs, running_loss = 0, 0, 0.0
+    n_correct, n_obs, run_loss = 0, 0, 0.0
     for i, (X, Y) in enumerate(loader):
         # Optimisation
         optimiser.zero_grad()
@@ -261,14 +331,14 @@ def optimise(model:nn.Module, loader, device:torch.device, criterion, optimiser,
         subset = ~torch.isnan(Y)
         n_obs += torch.sum(subset)
         n_correct += (Yh[subset].round() == Y[subset]).sum().item()
-        running_loss += (loss * torch.sum(subset)).item()
-        print_statistics(batch=i, n_batches=len(loader), running_loss=running_loss, n_obs=n_obs, n_correct=n_correct, label='Training')
-    return running_loss / n_obs
+        run_loss  += (loss * torch.sum(subset)).item()
+        print_statistics(batch=i, n_batches=len(loader), run_loss=run_loss, n_obs=n_obs, n_correct=n_correct, label='Training')
+    return run_loss / n_obs
 
 def validate(model:nn.Module, loader, device:torch.device, criterion, threshold:float=0.5) -> torch.Tensor:
     '''Validates a model using a validation sample for one epoch'''
     model.eval()
-    n_correct, n_obs, running_loss = 0, 0, 0.0
+    n_correct, n_obs, run_loss = 0, 0, 0.0
     with torch.no_grad():                       
         for i, (X, Y) in enumerate(loader):
             X, Y = X.to(device), Y.to(device)
@@ -278,9 +348,9 @@ def validate(model:nn.Module, loader, device:torch.device, criterion, threshold:
             subset = ~torch.isnan(Y)
             n_obs += torch.sum(subset)
             n_correct += ((Yh[subset] > threshold).float() == Y[subset]).sum().item()
-            running_loss += (loss * torch.sum(subset)).item()
-            print_statistics(batch=i, n_batches=len(loader), running_loss=running_loss, n_obs=n_obs, n_correct=n_correct, label='Validation')
-        return running_loss / n_obs
+            run_loss  += (loss * torch.sum(subset)).item()
+            print_statistics(batch=i, n_batches=len(loader), run_loss=run_loss, n_obs=n_obs, n_correct=n_correct, label='Validation')
+        return run_loss / n_obs
 
 def predict(model:nn.Module, loader, device:torch.device, n_batches:int=None) -> tuple:
     '''Predicts the labels of a sample'''
@@ -297,24 +367,5 @@ def predict(model:nn.Module, loader, device:torch.device, n_batches:int=None) ->
     Ys  = torch.cat(Ys)
     Yhs = torch.cat(Yhs)
     return Ys, Yhs
-
-class BceLoss(nn.Module):
-    '''Binary cross-entropy loss with optional focal loss'''
-    def __init__(self, focal:bool=True, drop_nan:bool=True, alpha:float=0.25, gamma:float=2.0):
-        super().__init__()
-        self.focal    = focal
-        self.drop_nan = drop_nan
-        self.alpha    = alpha
-        self.gamma    = gamma
-
-    def forward(self, inputs:torch.Tensor, targets:torch.Tensor) -> torch.Tensor:
-        subset = torch.ones(targets.size(), dtype=torch.bool)
-        if self.drop_nan:
-            subset = ~torch.isnan(targets)
-        loss = nn.functional.binary_cross_entropy(inputs[subset], targets[subset], reduction='none')
-        if self.focal:
-            loss = self.alpha * (1 - torch.exp(-loss))**self.gamma * loss
-        loss = torch.mean(loss)
-        return loss
 
 #%%

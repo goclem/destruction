@@ -21,6 +21,7 @@ class ImageEncoder(nn.Module):
         self.feature_extractor = feature_extractor
         self.downscale_layers  = nn.ModuleList([nn.Conv2d(128, 128, kernel_size=ks, stride=ks, groups=128) for ks in [8, 4, 2, 1]])
         self.adaptive_pooling  = nn.AdaptiveMaxPool2d((1, 1))
+        self.layer_norm        = nn.LayerNorm(512)
     
     def forward(self, X:torch.Tensor) -> torch.Tensor:
         n, t, d, h, w = X.size()
@@ -29,6 +30,7 @@ class ImageEncoder(nn.Module):
         H = [layer(h) for layer, h in zip(self.downscale_layers, H)]
         H = [self.adaptive_pooling(h) for h in H]
         H = torch.cat(H, dim=1).view(n, t, -1)
+        H = self.layer_norm(H)
         return H
 
 #%% SEQUENCE ENCODER
@@ -88,16 +90,14 @@ class PredictionHead(nn.Module):
 #%% MODEL WRAPPER
 
 class ModelWrapper(nn.Module):
-    def __init__(self, image_encoder:nn.Module, sequence_encoder:nn.Module, prediction_head:nn.Module, n_features:int):
+    def __init__(self, image_encoder:nn.Module, sequence_encoder:nn.Module, prediction_head:nn.Module):
         super().__init__()
         self.image_encoder    = image_encoder
-        self.layer_norm       = nn.LayerNorm(n_features)
         self.sequence_encoder = sequence_encoder
         self.prediction_head  = prediction_head
 
     def forward(self, X:torch.Tensor) -> torch.Tensor:
         H = self.image_encoder(X)    # Mapping: n x t x d x h x w > n x t x k
-        H = self.layer_norm(H)
         H = self.sequence_encoder(H) # Mapping: n x t x k > n x t x k
         Y = self.prediction_head(H)  # Mapping: n x t x k > n x t x 1
         return Y
@@ -106,12 +106,11 @@ class ModelWrapper(nn.Module):
 
 '''
 # Initialises model components
-image_encoder    = torch.load(f'{paths.models}/Aerial_SwinB_SI.pth')
-image_encoder    = ImageEncoder(image_encoder)
+image_encoder    = ImageEncoder(feature_extractor=torch.load(f'{paths.models}/Aerial_SwinB_SI.pth'))
 sequence_encoder = dict(input_dim=512, max_length=25, n_heads=4, hidden_dim=512, n_layers=4, dropout=0.0)
 sequence_encoder = SequenceEncoder(**sequence_encoder)
 prediction_head  = PredictionHead(input_dim=512, output_dim=1)
-model = ModelWrapper(image_encoder, sequence_encoder, prediction_head, n_features=512)
+model = ModelWrapper(image_encoder, sequence_encoder, prediction_head)
 
 # Checks model parameters
 count_parameters(model)
@@ -124,19 +123,11 @@ X, Y = next(iter(train_loader))
 print(X.size(), Y.size())
 display_sequence(X[0], Y[0], grid_size=(5,5))
 
-# Tests model components CPU
+# Tests model components
 with torch.no_grad():
     H = image_encoder(X)
     H = sequence_encoder(H)
     Y = prediction_head(H)
-
-# Tests model components GPU
-model.to(device)
-with torch.no_grad():
-    H = model.image_encoder(X.to(device))
-    H = model.sequence_encoder(H)
-    H = model.layer_norm(H)
-    Y = model.prediction_head(H)
 
 # Tests full model
 with torch.no_grad():
