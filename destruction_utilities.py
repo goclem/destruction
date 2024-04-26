@@ -17,6 +17,7 @@ import os
 import rasterio
 import re
 import shutil
+import time
 import torch
 import zarr
 
@@ -304,16 +305,17 @@ def empty_cache(device:torch.device) -> None:
     if device == 'mps':
         torch.mps.empty_cache()
 
-def print_statistics(batch:int, n_batches:int, run_loss:torch.Tensor, n_obs:int, n_correct:int, label:str) -> None:
+def print_statistics(batch:int, n_batches:int, run_loss:torch.Tensor, n_obs:int, n_correct:int, run_time:float, label:str) -> None:
     '''Prints the current statistics of a batch'''
     end_print = '\r' if batch+1 < n_batches else '\n'
-    print(f'{label: <10} | Batch {batch+1:03d}/{n_batches:03d} | Loss {run_loss / n_obs:.4f} | Accuracy {n_correct / n_obs:.4f}', end=end_print)
+    print(f'{label: <10} | Batch {batch+1:03d}/{n_batches:03d} | Loss {run_loss / n_obs:.4f} | Accuracy {n_correct / n_obs:.4f} | Runtime {run_time/(batch+1):2.2f}s (batch)', end=end_print)
 
 def optimise(model:nn.Module, loader, device:torch.device, criterion, optimiser, accumulate:int=1) -> torch.Tensor:
     '''Optimises a model using a training sample for one epoch'''
     model.train()
-    n_correct, n_obs, run_loss = 0, 0, 0.0
+    n_correct, n_obs, run_loss, run_time = 0, 0, 0.0, 0.0
     for i, (X, Y) in enumerate(loader):
+        start = time.time()
         # Optimisation
         optimiser.zero_grad()
         X, Y = X.to(device), Y.to(device)
@@ -332,13 +334,14 @@ def optimise(model:nn.Module, loader, device:torch.device, criterion, optimiser,
         n_obs += torch.sum(subset)
         n_correct += (Yh[subset].round() == Y[subset]).sum().item()
         run_loss  += (loss * torch.sum(subset)).item()
-        print_statistics(batch=i, n_batches=len(loader), run_loss=run_loss, n_obs=n_obs, n_correct=n_correct, label='Training')
+        run_time  += time.time() - start
+        print_statistics(batch=i, n_batches=len(loader), run_loss=run_loss, n_obs=n_obs, n_correct=n_correct, run_time=run_time, label='Training')
     return run_loss / n_obs
 
 def validate(model:nn.Module, loader, device:torch.device, criterion, threshold:float=0.5) -> torch.Tensor:
     '''Validates a model using a validation sample for one epoch'''
     model.eval()
-    n_correct, n_obs, run_loss = 0, 0, 0.0
+    n_correct, n_obs, run_loss, run_time = 0, 0, 0.0, 0.0
     with torch.no_grad():                       
         for i, (X, Y) in enumerate(loader):
             X, Y = X.to(device), Y.to(device)
@@ -349,7 +352,8 @@ def validate(model:nn.Module, loader, device:torch.device, criterion, threshold:
             n_obs += torch.sum(subset)
             n_correct += ((Yh[subset] > threshold).float() == Y[subset]).sum().item()
             run_loss  += (loss * torch.sum(subset)).item()
-            print_statistics(batch=i, n_batches=len(loader), run_loss=run_loss, n_obs=n_obs, n_correct=n_correct, label='Validation')
+            run_time  += time.time() - start
+            print_statistics(batch=i, n_batches=len(loader), run_loss=run_loss, n_obs=n_obs, n_correct=n_correct, run_time=run_time, label='Validation')
         return run_loss / n_obs
 
 def predict(model:nn.Module, loader, device:torch.device, n_batches:int=None) -> tuple:
