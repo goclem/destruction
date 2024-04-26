@@ -16,18 +16,19 @@ from torch import nn
 #%% IMAGE ENCODER
 
 class ImageEncoder(nn.Module):
-    def __init__(self, image_encoder:nn.Module):
+    def __init__(self, feature_extractor:nn.Module):
         super().__init__()
-        self.image_encoder = image_encoder
-        self.adaptive_pooling = nn.AdaptiveMaxPool2d((1, 1))
+        self.feature_extractor = feature_extractor
+        self.downscale_layers  = nn.ModuleList([nn.Conv2d(128, 128, kernel_size=ks, stride=ks, groups=128) for ks in [8, 4, 2, 1]])
+        self.adaptive_pooling  = nn.AdaptiveMaxPool2d((1, 1))
     
     def forward(self, X:torch.Tensor) -> torch.Tensor:
         n, t, d, h, w = X.size()
         H = X.view(n*t, d, h, w)
-        H = self.image_encoder(H)
+        H = self.feature_extractor(H)
+        H = [layer(h) for layer, h in zip(self.downscale_layers, H)]
         H = [self.adaptive_pooling(h) for h in H]
-        H = torch.cat(H, dim=1)
-        H = H.view(n, t, -1)
+        H = torch.cat(H, dim=1).view(n, t, -1)
         return H
 
 #%% SEQUENCE ENCODER
@@ -100,10 +101,6 @@ class ModelWrapper(nn.Module):
         H = self.sequence_encoder(H) # Mapping: n x t x k > n x t x k
         Y = self.prediction_head(H)  # Mapping: n x t x k > n x t x 1
         return Y
-
-#%% EXPERIMENTS
-
-nn.Conv2d(128, 128, kernel_size=4, dilation=4)(H[0]).size()
 
 #%% TESTING
 

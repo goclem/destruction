@@ -25,8 +25,8 @@ params = argparse.Namespace(
     cities=['aleppo'],
     tile_size=128, 
     grid_size=20, 
-    batch_size=16, 
-    label_map={0:0, 1:1, 2:1, 3:1, 255:torch.tensor(float('nan'))})
+    batch_size=32, 
+    label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
 
 #%% INITIALISES DATA LOADERS
 
@@ -103,15 +103,14 @@ del X, Y
 
 ''' #! Downloads pre-trained model
 import satlaspretrain_models
-image_encoder = satlaspretrain_models.Weights()
-image_encoder = image_encoder.get_pretrained_model(model_identifier='Aerial_SwinB_SI', fpn=True, device='cpu')
-torch.save(image_encoder, path.join(paths.models, 'Aerial_SwinB_SI.pth'))
-del image_encoder
+feature_extractor = satlaspretrain_models.Weights()
+feature_extractor = feature_extractor.get_pretrained_model(model_identifier='Aerial_SwinB_SI', fpn=True, device='cpu')
+torch.save(feature_extractor, path.join(paths.models, 'Aerial_SwinB_SI.pth'))
+del feature_extractor
 '''
 
 # Initialises model components
-image_encoder    = torch.load(path.join(paths.models, 'Aerial_SwinB_SI.pth'))
-image_encoder    = ImageEncoder(image_encoder)
+image_encoder    = ImageEncoder(feature_extractor=torch.load(f'{paths.models}/Aerial_SwinB_SI.pth'))
 sequence_encoder = dict(input_dim=512, max_length=25, n_heads=4, hidden_dim=512, n_layers=4, dropout=0.0)
 sequence_encoder = SequenceEncoder(**sequence_encoder)
 prediction_head  = PredictionHead(input_dim=512, output_dim=1)
@@ -130,16 +129,16 @@ del image_encoder, sequence_encoder, prediction_head
 #%% OPTIMISATION
 
 ''' #? Loads previous checkpoint
-model = torch.load(f'{paths.models}/ModelWrapper_subset123.pth')
+model = torch.load(f'{paths.models}/ModelWrapper_full123.pth')
 '''
 
 #? Parameter alignment i.e. freezes image encoder's parameters
-set_trainable(model.image_encoder, False)
+set_trainable(model.image_encoder.feature_extractor, False)
 count_parameters(model)
 optimiser = optim.AdamW(model.parameters(), lr=1e-4)
 
 ''' #? Fine tuning i.e. unfreezes image encoder's parameters
-set_trainable(model.image_encoder, True)
+set_trainable(model.image_encoder.feature_extractor, True)
 optimiser = optim.AdamW(model.parameters(), lr=1e-5)
 count_parameters(model)
 '''
@@ -171,22 +170,23 @@ def train(model:nn.Module, train_loader, valid_loader, device:torch.device, crit
 criterion = BceLoss(focal=True, drop_nan=True, alpha=0.25, gamma=2.0)
 
 # Training
-train(model=model, 
-      train_loader=train_loader, 
-      valid_loader=valid_loader, 
-      device=device, 
-      criterion=criterion, 
-      optimiser=optimiser, 
-      n_epochs=25, 
-      patience=3,
-      accumulate=1,
-      path=paths.models)
+    train(model=model, 
+        train_loader=train_loader, 
+        valid_loader=valid_loader, 
+        device=device, 
+        criterion=criterion, 
+        optimiser=optimiser, 
+        n_epochs=25, 
+        patience=3,
+        accumulate=1,
+        path=paths.models)
 
 empty_cache(device)
 
 #%% ESTIMATES THRESHOLD
 
 def compute_threshold(model:nn.Module, loader, device:torch.device, n_batches:int=None) -> float:
+    '''Estimates threshold for binary classification'''
     Y, Yh  = predict(model, loader=train_loader, device=device, n_batches=n_batches)
     subset = ~Y.isnan()
     fpr, tpr, thresholds = metrics.roc_curve(Y[subset].cpu(), Yh[subset].cpu())
