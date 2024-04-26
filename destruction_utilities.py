@@ -308,7 +308,7 @@ def empty_cache(device:torch.device) -> None:
 def print_statistics(batch:int, n_batches:int, run_loss:torch.Tensor, n_obs:int, n_correct:int, run_time:float, label:str) -> None:
     '''Prints the current statistics of a batch'''
     end_print = '\r' if batch+1 < n_batches else '\n'
-    print(f'{label: <10} | Batch {batch+1:03d}/{n_batches:03d} | Loss {run_loss / n_obs:.4f} | Accuracy {n_correct / n_obs:.4f} | Runtime {run_time/(batch+1):2.2f}s (batch)', end=end_print)
+    print(f'{label: <10} | Batch {batch+1:03d}/{n_batches:03d} | Loss {run_loss / n_obs:.4f} | Accuracy {n_correct / n_obs:.4f} | Runtime {run_time/(batch+1):2.2f}s', end=end_print)
 
 def optimise(model:nn.Module, loader, device:torch.device, criterion, optimiser, accumulate:int=1) -> torch.Tensor:
     '''Optimises a model using a training sample for one epoch'''
