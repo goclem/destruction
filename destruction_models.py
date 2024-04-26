@@ -101,6 +101,10 @@ class ModelWrapper(nn.Module):
         Y = self.prediction_head(H)  # Mapping: n x t x k > n x t x 1
         return Y
 
+#%% EXPERIMENTS
+
+nn.Conv2d(128, 128, kernel_size=4, dilation=4)(H[0]).size()
+
 #%% TESTING
 
 '''

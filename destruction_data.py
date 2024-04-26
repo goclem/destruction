@@ -110,7 +110,7 @@ for i, (image, label) in enumerate(zip(images, labels)):
             dataset = zarr.open(dataset, mode='a', shape=shape, dtype='u1')
             dataset[:,i] = array
             del label, array, shape, dataset
-    del image, label, arrays
+    del image, arrays
 
 del images, labels, samples
 

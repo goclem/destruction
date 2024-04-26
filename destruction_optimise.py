@@ -22,7 +22,7 @@ from sklearn import metrics
 # Utilities
 device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
 params = argparse.Namespace(
-    cities=['aleppo', 'rakka'],
+    cities=['aleppo'],
     tile_size=128, 
     grid_size=20, 
     batch_size=16, 
@@ -59,18 +59,18 @@ class ZarrDataLoader:
         self.slice_sizes = (dataset_sizes / dataset_sizes.sum() * self.batch_size).round().int()
         self.n_batches   = (dataset_sizes // self.slice_sizes).min()
     
-    def pad_sequence(self, sequence:torch.Tensor, value:int, dim:int=1, T:int=25) -> torch.Tensor:
+    def pad_sequence(self, sequence:torch.Tensor, value:int, seq_len:int=None, dim:int=1) -> torch.Tensor:
         pad = torch.zeros(2*len(sequence.size()), dtype=int)
-        pad = pad.index_fill(0, torch.tensor(2*dim), T-sequence.size(dim)).flip(0).tolist()
+        pad = pad.index_fill(0, torch.tensor(2*dim), seq_len-sequence.size(dim)).flip(0).tolist()
         pad = nn.functional.pad(sequence, pad=pad, value=value)
         return pad
 
     def __iter__(self):
         data_loaders = [utils.data.DataLoader(dataset, batch_size=int(slice_size)) for dataset, slice_size in zip(self.datasets, self.slice_sizes)]
         for batch in zip(*data_loaders):
-            T = max([data[0].size(1) for data in batch])
-            X = torch.cat([self.pad_sequence(data[0], value=0,   T=T, dim=1) for data in batch])
-            Y = torch.cat([self.pad_sequence(data[1], value=255, T=T, dim=1) for data in batch])
+            seq_len = max([data[0].size(1) for data in batch])
+            X = torch.cat([self.pad_sequence(data[0], value=0,   seq_len=seq_len, dim=1) for data in batch])
+            Y = torch.cat([self.pad_sequence(data[1], value=255, seq_len=seq_len, dim=1) for data in batch])
             X = torch.div(X.float(), 255)
             for key, value in self.label_map.items():
                 Y = torch.where(Y == key, value, Y)
@@ -80,9 +80,15 @@ class ZarrDataLoader:
     def __len__(self):
         return self.n_batches
 
-train_loader = [ZarrDataset(f'{paths.data}/{city}/zarr/images_train.zarr', f'{paths.data}/{city}/zarr/labels_train.zarr') for city in params.cities]
-valid_loader = [ZarrDataset(f'{paths.data}/{city}/zarr/images_valid.zarr', f'{paths.data}/{city}/zarr/labels_valid.zarr') for city in params.cities]
-test_loader  = [ZarrDataset(f'{paths.data}/{city}/zarr/images_test.zarr',  f'{paths.data}/{city}/zarr/labels_test.zarr')  for city in params.cities]
+# Datasets
+train_datasets = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_train.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_train.zarr') for city in params.cities]))
+valid_datasets = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_valid.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_valid.zarr') for city in params.cities]))
+test_datasets  = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_test.zarr',  labels_zarr=f'{paths.data}/{city}/zarr/labels_test.zarr')  for city in params.cities]))
+
+# Intialises data loaders
+train_loader = [ZarrDataset(**train_datasets[city]) for city in params.cities]
+valid_loader = [ZarrDataset(**valid_datasets[city]) for city in params.cities]
+test_loader  = [ZarrDataset(**test_datasets[city])  for city in params.cities]
 train_loader = ZarrDataLoader(train_loader, batch_size=params.batch_size, label_map=params.label_map)
 valid_loader = ZarrDataLoader(valid_loader, batch_size=params.batch_size, label_map=params.label_map)
 test_loader  = ZarrDataLoader(test_loader,  batch_size=params.batch_size, label_map=params.label_map)
@@ -124,7 +130,7 @@ del image_encoder, sequence_encoder, prediction_head
 #%% OPTIMISATION
 
 ''' #? Loads previous checkpoint
-model = torch.load(f'{paths.models}/ModelWrapper_best.pth')
+model = torch.load(f'{paths.models}/ModelWrapper_subset123.pth')
 '''
 
 #? Parameter alignment i.e. freezes image encoder's parameters
@@ -150,6 +156,10 @@ def train(model:nn.Module, train_loader, valid_loader, device:torch.device, crit
             best_loss = valid_loss
             counter = 0
             torch.save(model, f'{path}/{model.__class__.__name__}_best.pth')
+            # Shuffles zarr datasets
+            for city in params.cities:
+                shuffle_zarr(**train_datasets[city])
+                shuffle_zarr(**valid_datasets[city])
         else:
             counter += 1
             if counter >= patience:
@@ -167,29 +177,23 @@ train(model=model,
       device=device, 
       criterion=criterion, 
       optimiser=optimiser, 
-      n_epochs=10, 
+      n_epochs=25, 
       patience=3,
       accumulate=1,
       path=paths.models)
 
-# Restores best model
-model = torch.load(f'{paths.models}/ModelWrapper_best.pth')
-
-# Testing
-validate(model=model, loader=test_loader, device=device, criterion=criterion)
 empty_cache(device)
 
 #%% ESTIMATES THRESHOLD
 
-def compute_threshold(model:nn.Module, loader, device:torch.device) -> float:
-    Y, Yh  = predict(model, loader=train_loader, device=device)
+def compute_threshold(model:nn.Module, loader, device:torch.device, n_batches:int=None) -> float:
+    Y, Yh  = predict(model, loader=train_loader, device=device, n_batches=n_batches)
     subset = ~Y.isnan()
-    precision, recall, threshold = metrics.precision_recall_curve(Y[subset].cpu(), Yh[subset].cpu())
-    fscore    = (2 * precision * recall) / (precision + recall)
-    threshold = threshold[np.argmax(fscore)]
+    fpr, tpr, thresholds = metrics.roc_curve(Y[subset].cpu(), Yh[subset].cpu())
+    threshold = thresholds[np.argmax(tpr - fpr)]
     return threshold
 
-# Threshold estimation
+# Threshold estimation  
 threshold = compute_threshold(model=model, loader=train_loader, device=device)
 print(f'Threshold: {threshold:.2f}')
 

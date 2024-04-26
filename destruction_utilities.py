@@ -282,15 +282,18 @@ def validate(model:nn.Module, loader, device:torch.device, criterion, threshold:
             print_statistics(batch=i, n_batches=len(loader), running_loss=running_loss, n_obs=n_obs, n_correct=n_correct, label='Validation')
         return running_loss / n_obs
 
-def predict(model:nn.Module, loader, device:torch.device) -> tuple:
+def predict(model:nn.Module, loader, device:torch.device, n_batches:int=None) -> tuple:
     '''Predicts the labels of a sample'''
     model.eval()
-    Ys, Yhs = [None]*len(loader), [None]*len(loader)
+    if n_batches is None:
+        n_batches = len(loader)
+    Ys, Yhs = [None]*n_batches, [None]*n_batches
     with torch.no_grad():
-        for i, (X, Y) in enumerate(loader):
+        for i in range(n_batches):
+            X, Y   = next(iter(loader))
             Ys[i]  = Y
             Yhs[i] = model(X.to(device))
-            print(f'Batch {i+1:03d}/{len(loader):03d}', end='\r')
+            print(f'Batch {i+1:03d}/{n_batches:03d}', end='\r')
     Ys  = torch.cat(Ys)
     Yhs = torch.cat(Yhs)
     return Ys, Yhs
