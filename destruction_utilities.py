@@ -24,6 +24,7 @@ import zarr
 from matplotlib import pyplot
 from rasterio import enums, features, windows
 from torch import nn, utils
+from torcheval import metrics
 
 #%% PATHS UTILITIES
 
@@ -313,9 +314,10 @@ def print_statistics(batch:int, n_batches:int, run_loss:torch.Tensor, n_obs:int,
 def optimise(model:nn.Module, loader, device:torch.device, criterion, optimiser, accumulate:int=1) -> torch.Tensor:
     '''Optimises a model using a training sample for one epoch'''
     model.train()
-    n_correct, n_obs, run_loss, run_time = 0, 0, 0.0, 0.0
+    accuracy = metrics.BinaryAccuracy(device='cpu')
+    auroc    = metrics.BinaryAUROC(device='cpu')
+    run_loss, n_obs = 0.0, 0
     for i, (X, Y) in enumerate(loader):
-        start = time.time()
         # Optimisation
         optimiser.zero_grad()
         X, Y = X.to(device), Y.to(device)
@@ -331,17 +333,20 @@ def optimise(model:nn.Module, loader, device:torch.device, criterion, optimiser,
                     param.grad.data.add_(param.grad.data)
         # Statistics
         subset = ~torch.isnan(Y)
-        n_obs += torch.sum(subset)
-        n_correct += (Yh[subset].round() == Y[subset]).sum().item()
-        run_loss  += (loss * torch.sum(subset)).item()
-        run_time  += time.time() - start
-        print_statistics(batch=i, n_batches=len(loader), run_loss=run_loss, n_obs=n_obs, n_correct=n_correct, run_time=run_time, label='Training')
+        n_obs += subset.sum()
+        run_loss += (loss * subset.sum()).item()
+        accuracy.update(Y[subset], Yh[subset] > .5)
+        auroc.update(Y[subset], Yh[subset])
+        # Print statistics
+        print(f'{'Training': <10} | Batch {i+1:03d}/{len(loader):03d} | Accuracy {accuracy.compute().item():.4f} | Auroc {auroc.compute().item():.4f}', end='\r' if i+1 < len(loader) else '\n')
     return run_loss / n_obs
 
 def validate(model:nn.Module, loader, device:torch.device, criterion, threshold:float=0.5) -> torch.Tensor:
     '''Validates a model using a validation sample for one epoch'''
     model.eval()
-    n_correct, n_obs, run_loss, run_time = 0, 0, 0.0, 0.0
+    accuracy = metrics.BinaryAccuracy(device='cpu')
+    auroc    = metrics.BinaryAUROC(device='cpu')
+    run_loss, n_obs = 0.0, 0
     with torch.no_grad():                       
         for i, (X, Y) in enumerate(loader):
             X, Y = X.to(device), Y.to(device)
@@ -349,11 +354,9 @@ def validate(model:nn.Module, loader, device:torch.device, criterion, threshold:
             loss = criterion(Yh, Y)
             # Statistics
             subset = ~torch.isnan(Y)
-            n_obs += torch.sum(subset)
-            n_correct += ((Yh[subset] > threshold).float() == Y[subset]).sum().item()
-            run_loss  += (loss * torch.sum(subset)).item()
-            run_time  += time.time() - start
-            print_statistics(batch=i, n_batches=len(loader), run_loss=run_loss, n_obs=n_obs, n_correct=n_correct, run_time=run_time, label='Validation')
+            n_obs += subset.sum()
+            run_loss += (loss * subset.sum()).item()
+            print(f'{'Validation': <10} | Batch {i+1:03d}/{len(loader):03d} | Accuracy {accuracy.compute().item():.4f} | Auroc {auroc.compute().item():.4f}', end='\r' if i+1 < len(loader) else '\n')
         return run_loss / n_obs
 
 def predict(model:nn.Module, loader, device:torch.device, n_batches:int=None) -> tuple:
