@@ -3,6 +3,7 @@
 ## To do
 
 - Artemisa implementation (Dominik)
+- Add relevant classification metrics (Clément)
 
 ## Questions
 

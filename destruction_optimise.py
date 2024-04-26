@@ -147,6 +147,7 @@ X, Y = next(iter(test_loader))
 with torch.no_grad():
     Yh = model(X.to(device)).cpu()
 Y, Yh  = Y.squeeze(), Yh.squeeze()
+
 status = torch.where(torch.isnan(Y), torch.nan, torch.eq(Y, Yh > threshold))
 
 for i in np.random.choice(range(len(X)), 2, replace=False):
