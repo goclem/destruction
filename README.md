@@ -2,9 +2,25 @@
 
 ## To do
 
-1. Artemisa implementation (Dominik)
-2. Multi-city training (Clément)
-3. Efficient shuffling on epoch end (Clément)
+- Artemisa implementation (Dominik)
+
+## Questions
+
+**Data**
+
+- How to aggregate buildings with different levels of destruction on a label tile?
+- Should destruction 1 and 2 be labelled as 0?
+- Should patches overlap for more robust-smooth predictions?
+
+**Model**
+
+- Should the sequence encoder access the post data?
+- Should the ourput layer be an ordinal regression?
+
+**Training**
+
+- Should we fine-tune the image encoder?
+- Should the sequence encoder be trained directly in the embedding space?
 
 ## Experiments
 
@@ -21,6 +37,7 @@ Experiments performed on Aleppo
 **Subsamples**
 
 - Keeping the sequences with some destruction &rarr; 0.95 test accuracy
+- Does not generalise to full sample
 
 **Focal loss**
 
@@ -39,6 +56,7 @@ Experiments performed on Aleppo
 	- Domain transfer for HR aerial images (e.g. trained on snow)
 	- Extract images features at different scales
 	- Decreased computational cost, fine-tuning optionnal
+	- Parametrised dimensionality reduction
 - Transformer as sequence encoder
 	- Processes sequences of varying lengths
 	- Captures temporal dependence between images and labels
@@ -58,22 +76,13 @@ Experiments performed on Aleppo
 	- City e.g. Aleppo
 	- Sample i.e. train, valid, test
 	- Dataset i.e. images, labels
-- Shuffle cities on epoch end
-- Data loader using from multiple city datasets
+- Data loader using multiple city datasets
+- Shuffle training and validation datasets on epoch end
 
 **Predictions**
 
 - Predict using moving windows
 - Estimate the threshold that maximises the F-score
-
-## Questions
-
-- Which summary function for the feature sets at different resolutions?
-- How to aggregate buildings with different levels of destruction on a label tile?
-- Should destruction 1 and 2 be labelled as 0? Ordinal regression?
-- Should the sequence encoder access the post data?
-- Should patches overlap for more robust-smooth predictions? Which labels?
-- Should we fine-tune the image encoder?
 
 ## Resources
 
