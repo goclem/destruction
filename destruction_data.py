@@ -20,7 +20,11 @@ from numpy import random
 from destruction_utilities import *
 
 # Utilities
-params = argparse.Namespace(city='aleppo', tile_size=128, train_size=0.50, valid_size=0.25, test_size=0.25)
+params = argparse.Namespace(
+    city='aleppo', 
+    tile_size=128, 
+    train_size=0.50, valid_size=0.25, test_size=0.25,
+    label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
 
 #%% COMPUTES SAMPLES
 
@@ -61,7 +65,7 @@ damage = damage.reindex(sorted(damage.columns), axis=1)
 damage, geoms = damage.drop(columns='geometry'), damage.geometry
 
 # Fills missing dates
-damage.insert(0,  'pre',  0) #? Insert pre-destruction label
+damage.insert(0,  'pre',  0)
 damage.insert(len(damage.columns), 'post', damage[damage.T.last_valid_index()]) #? Insert post-destruction label (i.e. no reconstruction)
 filling = damage.T.ffill().bfill().T
 defined = damage.T.bfill().ffill().T
@@ -85,9 +89,8 @@ del dates, date, subset
 
 #%% CREATES ZARR DATASETS
 
-''' #! Removes existing zarr
+#! Removes existing zarr
 reset_folder(f'{paths.data}/{params.city}/zarr', remove=True)
-'''
 
 # Files and samples
 images  = search_data(pattern(city=params.city, type='image'))
@@ -115,9 +118,8 @@ for i, (image, label) in enumerate(zip(images, labels)):
 
 del images, labels, samples
 
-#%% SUBSETS ZARR DATASETS
+#%% DOWNSAMPLES NO-DESTRUCTION SEQUENCES
 
-#! Keeps only the samples with destruction
 for sample in ['train', 'valid']:
     print(f'Processing {sample} sample')
     # Define paths
@@ -127,9 +129,13 @@ for sample in ['train', 'valid']:
     images = zarr.open(images_zarr, mode='r')[:]
     labels = zarr.open(labels_zarr, mode='r')[:]
     # Subsets datasets
-    subset = (np.sum(np.isin(labels, [1,2,3]), axis=1) > 0).flatten()
-    images = images[subset]
-    labels = labels[subset]
+    destroy = [k for k, v in params.label_map.items() if v == 1]
+    destroy = (np.sum(np.isin(labels, destroy), axis=1) > 0).flatten()
+    indices = np.concatenate((
+        np.where(destroy)[0],
+        np.random.choice(np.where(~destroy)[0], np.sum(destroy), replace=False)))
+    images = images[indices]
+    labels = labels[indices]
     # Writes data
     dataset = zarr.open(images_zarr, shape=images.shape, dtype=images.dtype, mode='w')
     dataset[:] = images
@@ -137,7 +143,7 @@ for sample in ['train', 'valid']:
     dataset[:] = labels
     # Shuffles datasets
     shuffle_zarr(images_zarr, labels_zarr)
-    del images_zarr, labels_zarr, images, labels, subset, dataset
+    del images_zarr, labels_zarr, images, labels, destroy, indices, dataset
 
 #%% DOWNLOADS FEATURE EXTRACTOR
 

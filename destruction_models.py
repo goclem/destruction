@@ -11,6 +11,7 @@
 # Packages
 import math
 import torch
+
 from torch import nn
 
 #%% IMAGE ENCODER
@@ -102,7 +103,7 @@ class ModelWrapper(nn.Module):
         Y = self.prediction_head(H)  # Mapping: n x t x k > n x t x 1
         return Y
 
-#%% TESTING
+#%% TESTS MODEL COMPONENTS
 
 '''
 # Initialises model components

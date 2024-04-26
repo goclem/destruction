@@ -45,10 +45,11 @@ test_loader  = ZarrDataLoader(test_loader,  batch_size=params.batch_size, label_
 ''' Checks data loaders
 X, Y = next(iter(train_loader))
 display_sequence(X[0], Y[0], grid_size=(5,5))
+display_sequence(X[1], Y[1], grid_size=(5,5))
 del X, Y
 ''' 
 
-#%% INTIALISES MODELS
+#%% INTIALISES MODEL
 
 # Initialises model components
 image_encoder    = ImageEncoder(feature_extractor=torch.load(f'{paths.models}/Aerial_SwinB_SI.pth'))
@@ -67,16 +68,17 @@ count_parameters(model.sequence_encoder)
 
 del image_encoder, sequence_encoder, prediction_head
 
-#%% OPTIMISATION
+#%% OPITIMISES PARAMETERS
 
-''' #? Loads previous checkpoint
-model = torch.load(f'{paths.models}/ModelWrapper_full123.pth')
-'''
+#? Loads previous checkpoint
+model = torch.load(f'{paths.models}/ModelWrapper_best.pth')
 
 #? Parameter alignment i.e. freezes image encoder's parameters
 set_trainable(model.image_encoder.feature_extractor, False)
 count_parameters(model)
-optimiser = optim.AdamW(model.parameters(), lr=1e-4)
+
+optimiser = optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
+criterion = BceLoss(focal=True, drop_nan=True, alpha=0.25, gamma=2.0)
 
 ''' #? Fine tuning i.e. unfreezes image encoder's parameters
 set_trainable(model.image_encoder.feature_extractor, True)
@@ -84,7 +86,7 @@ optimiser = optim.AdamW(model.parameters(), lr=1e-5)
 count_parameters(model)
 '''
 
-def train(model:nn.Module, train_loader, valid_loader, device:torch.device, criterion, optimiser, n_epochs:int=1, patience:int=1, accumulate:int=1, path:str=paths.models):
+def train(model:nn.Module, train_loader, valid_loader, device:torch.device, criterion, optimiser, n_epochs:int=1, patience:int=1, accumulate:int=1):
     '''Trains a model using a training and validation sample'''
     best_loss, counter = torch.tensor(float('inf')), 0
     for epoch in range(n_epochs):
@@ -95,7 +97,7 @@ def train(model:nn.Module, train_loader, valid_loader, device:torch.device, crit
         if valid_loss < best_loss:
             best_loss = valid_loss
             counter = 0
-            torch.save(model, f'{path}/{model.__class__.__name__}_best.pth')
+            torch.save(model, f'{paths.models}/{model.__class__.__name__}_best.pth')
             # Shuffles zarr datasets
             for city in params.cities:
                 shuffle_zarr(**train_datasets[city])
@@ -107,9 +109,6 @@ def train(model:nn.Module, train_loader, valid_loader, device:torch.device, crit
                 return model
                 break
 
-# Loss function
-criterion = BceLoss(focal=True, drop_nan=True, alpha=0.25, gamma=2.0)
-
 # Training
 train(model=model, 
       train_loader=train_loader, 
@@ -119,16 +118,16 @@ train(model=model,
       optimiser=optimiser, 
       n_epochs=25, 
       patience=3,
-      accumulate=1,
-      path=paths.models)
+      accumulate=1)
 
+# Clears GPU memory
 empty_cache(device)
 
 #%% ESTIMATES THRESHOLD
 
 def compute_threshold(model:nn.Module, loader, device:torch.device, n_batches:int=None) -> float:
     '''Estimates threshold for binary classification'''
-    Y, Yh  = predict(model, loader=train_loader, device=device, n_batches=n_batches)
+    Y, Yh = predict(model, loader=train_loader, device=device, n_batches=n_batches)
     subset = ~Y.isnan()
     fpr, tpr, thresholds = metrics.roc_curve(Y[subset].cpu(), Yh[subset].cpu())
     threshold = thresholds[np.argmax(tpr - fpr)]
@@ -143,15 +142,15 @@ validate(model=model, loader=test_loader, device=device, criterion=criterion, th
 
 #%% CHECKS PREDICTIONS
 
+model.eval()
+X, Y = next(iter(test_loader))
 with torch.no_grad():
-    X, Y = next(iter(test_loader))
     Yh = model(X.to(device)).cpu()
+Y, Yh  = Y.squeeze(), Yh.squeeze()
+status = torch.where(torch.isnan(Y), torch.nan, torch.eq(Y, Yh > threshold))
 
-Y, Yh  = Y.squeeze().numpy(), Yh.squeeze_().numpy()
-status = np.where(np.isnan(Y), 'Nan', np.equal(Y, Yh > threshold))
-
-for i in np.random.choice(range(len(Y)), 2, replace=False):
-    titles = [f'{s}\nY: {y:.0f} - Yh: {yh > threshold:.0f} ({yh:.2f})'for s, y, yh in zip(status[i], Y[i], Yh[i])]
+for i in np.random.choice(range(len(X)), 2, replace=False):
+    titles = [f'{s:.0f}\nY: {y:.0f} - Yh: {yh > threshold:.0f} ({yh:.2f})' for s, y, yh in zip(status[i], Y[i], Yh[i])]
     display_sequence(X[i], titles, grid_size=(5,5))
 del titles
 
