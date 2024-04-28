@@ -44,7 +44,8 @@ test_loader  = ZarrDataLoader(test_loader,  batch_size=params.batch_size, label_
 
 ''' Checks data loaders
 X, Y = next(iter(train_loader))
-display_sequence(X[0], Y[0], grid_size=(5,5))
+for i in range(5):
+    display_sequence(X[i], Y[i], grid_size=(5,5))
 del X, Y
 ''' 
 

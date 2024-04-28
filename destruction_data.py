@@ -30,8 +30,7 @@ params = argparse.Namespace(
 
 # Loads data
 image      = search_data(pattern=pattern(city=params.city, type='image'))[0]
-settlement = search_data(pattern=f'{params.city}_settlement.*gpkg$')[0]
-noanalysis = search_data(pattern=f'{params.city}_noanalysis.*gpkg$')[0]
+settlement = search_data(pattern=f'{params.city}_noanalysis.*gpkg$')[0]
 
 # Computes analysis zone
 profile    = tiled_profile(image, tile_size=params.tile_size)
