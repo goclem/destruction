@@ -24,7 +24,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.ba
 params = argparse.Namespace(
     cities=['aleppo'],
     tile_size=128, 
-    batch_size=32, 
+    batch_size=16, 
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
 
 #%% INITIALISES DATA LOADERS
@@ -45,7 +45,6 @@ test_loader  = ZarrDataLoader(test_loader,  batch_size=params.batch_size, label_
 ''' Checks data loaders
 X, Y = next(iter(train_loader))
 display_sequence(X[0], Y[0], grid_size=(5,5))
-display_sequence(X[1], Y[1], grid_size=(5,5))
 del X, Y
 ''' 
 
@@ -71,14 +70,14 @@ del image_encoder, sequence_encoder, prediction_head
 #%% OPITIMISES PARAMETERS
 
 #? Loads previous checkpoint
-model = torch.load(f'{paths.models}/ModelWrapper_best.pth')
+# model = torch.load(f'{paths.models}/ModelWrapper_best.pth')
 
 #? Parameter alignment i.e. freezes image encoder's parameters
 set_trainable(model.image_encoder.feature_extractor, False)
 count_parameters(model)
 
 optimiser = optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
-criterion = BceLoss(focal=True, drop_nan=True, alpha=0.25, gamma=2.0)
+criterion = BceLoss(focal=False, drop_nan=True, alpha=0.25, gamma=2.0)
 
 ''' #? Fine tuning i.e. unfreezes image encoder's parameters
 set_trainable(model.image_encoder.feature_extractor, True)
@@ -106,7 +105,6 @@ def train(model:nn.Module, train_loader, valid_loader, device:torch.device, crit
             counter += 1
             if counter >= patience:
                 print('- Early stopping')
-                return model
                 break
 
 # Training
@@ -144,15 +142,19 @@ validate(model=model, loader=test_loader, device=device, criterion=criterion, th
 
 model.eval()
 X, Y = next(iter(test_loader))
+susbset = torch.sum(Y==1, axis=(1, 2)) > 0
+X, Y = X[susbset], Y[susbset]
+
 with torch.no_grad():
     Yh = model(X.to(device)).cpu()
 Y, Yh  = Y.squeeze(), Yh.squeeze()
 
+threshold = 0.5
 status = torch.where(torch.isnan(Y), torch.nan, torch.eq(Y, Yh > threshold))
 
-for i in np.random.choice(range(len(X)), 2, replace=False):
-    titles = [f'{s:.0f}\nY: {y:.0f} - Yh: {yh > threshold:.0f} ({yh:.2f})' for s, y, yh in zip(status[i], Y[i], Yh[i])]
-    display_sequence(X[i], titles, grid_size=(5,5))
-del titles
+    for i in np.random.choice(range(len(X)), 2, replace=False):
+        titles = [f'{s:.0f}\nY: {y:.0f} - Yh: {yh > threshold:.0f} ({yh:.2f})' for s, y, yh in zip(status[i], Y[i], Yh[i])]
+        display_sequence(X[i], titles, grid_size=(5,5))
+    del titles
 
 #%%

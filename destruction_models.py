@@ -125,10 +125,17 @@ print(X.size(), Y.size())
 display_sequence(X[0], Y[0], grid_size=(5,5))
 
 # Tests model components
+
 with torch.no_grad():
     H = image_encoder(X)
     H = sequence_encoder(H)
     Y = prediction_head(H)
+
+# Tests model components
+with torch.no_grad():
+    H = model.image_encoder(X.to(device))
+    H = model.sequence_encoder(H)
+    Y = model.prediction_head(H)
 
 # Tests full model
 with torch.no_grad():

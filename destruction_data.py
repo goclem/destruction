@@ -120,7 +120,7 @@ del images, labels, samples
 
 #%% DOWNSAMPLES NO-DESTRUCTION SEQUENCES
 
-for sample in ['train', 'valid']:
+for sample in ['train', 'valid', 'test']:
     print(f'Processing {sample} sample')
     # Define paths
     images_zarr = f'{paths.data}/{params.city}/zarr/images_{sample}.zarr'
@@ -149,5 +149,5 @@ for sample in ['train', 'valid']:
 
 feature_extractor = satlaspretrain_models.Weights()
 feature_extractor = feature_extractor.get_pretrained_model(model_identifier='Aerial_SwinB_SI', fpn=True, device='cpu')
-torch.save(feature_extractor, path.join(paths.models, 'Aerial_SwinB_SI.pth'))
+torch.save(feature_extractor, f'{paths.models}/Aerial_SwinB_SI.pth')
 del feature_extractor

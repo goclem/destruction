@@ -356,6 +356,9 @@ def validate(model:nn.Module, loader, device:torch.device, criterion, threshold:
             subset = ~torch.isnan(Y)
             n_obs += subset.sum()
             run_loss += (loss * subset.sum()).item()
+            accuracy.update(Y[subset], Yh[subset] > .5)
+            auroc.update(Y[subset], Yh[subset])
+            # Print statistics
             print(f'{'Validation': <10} | Batch {i+1:03d}/{len(loader):03d} | Accuracy {accuracy.compute().item():.4f} | Auroc {auroc.compute().item():.4f}', end='\r' if i+1 < len(loader) else '\n')
         return run_loss / n_obs
 
