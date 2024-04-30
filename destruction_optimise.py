@@ -117,7 +117,7 @@ train(model=model,
       optimiser=optimiser, 
       n_epochs=25, 
       patience=3,
-      accumulate=1)
+      accumulate=4)
 
 # Clears GPU memory
 empty_cache(device)
@@ -153,9 +153,9 @@ Y, Yh  = Y.squeeze(), Yh.squeeze()
 threshold = 0.5
 status = torch.where(torch.isnan(Y), torch.nan, torch.eq(Y, Yh > threshold))
 
-    for i in np.random.choice(range(len(X)), 2, replace=False):
-        titles = [f'{s:.0f}\nY: {y:.0f} - Yh: {yh > threshold:.0f} ({yh:.2f})' for s, y, yh in zip(status[i], Y[i], Yh[i])]
-        display_sequence(X[i], titles, grid_size=(5,5))
-    del titles
+for i in np.random.choice(range(len(X)), 2, replace=False):
+    titles = [f'{s:.0f}\nY: {y:.0f} - Yh: {yh > threshold:.0f} ({yh:.2f})' for s, y, yh in zip(status[i], Y[i], Yh[i])]
+    display_sequence(X[i], titles, grid_size=(5,5))
+del titles
 
 #%%
