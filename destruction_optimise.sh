@@ -6,4 +6,4 @@
 # Date: 2024-05-01
 # Version: 1.0
 
-python destruction_optimise.py --cities moschun aleppo volnovakha
+python3 destruction_optimise.py --cities moschun aleppo volnovakha
