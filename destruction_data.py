@@ -30,7 +30,8 @@ params = argparse.Namespace(
 
 # Loads data
 image      = search_data(pattern=pattern(city=params.city, type='image'))[0]
-settlement = search_data(pattern=f'{params.city}_noanalysis.*gpkg$')[0]
+noanalysis = search_data(pattern=f'{params.city}_noanalysis.*gpkg$')[0]
+settlement = search_data(pattern=f'{params.city}_settlement.*gpkg$')[0]
 
 # Computes analysis zone
 profile    = tiled_profile(image, tile_size=params.tile_size)
@@ -56,7 +57,7 @@ damage = gpd.read_file(damage)
 
 # Extract images dates
 dates = search_data(pattern=pattern(city=params.city, type='image'))
-dates = extract(dates, r'\d{4}-\d{2}-\d{2}')
+dates = extract(dates, r'\d{4}_\d{2}_\d{2}')
 
 # Adds images dates to damage dataset
 damage[list(set(dates) - set(damage.columns))] = np.nan
@@ -132,7 +133,7 @@ for sample in ['train', 'valid', 'test']:
     destroy = (np.sum(np.isin(labels, destroy), axis=1) > 0).flatten()
     indices = np.concatenate((
         np.where(destroy)[0],
-        np.random.choice(np.where(~destroy)[0], np.sum(destroy), replace=False)))
+        np.random.choice(np.where(~destroy)[0], np.sum(destroy))))
     images = images[indices]
     labels = labels[indices]
     # Writes data

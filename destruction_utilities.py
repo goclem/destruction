@@ -55,7 +55,7 @@ def pattern(city:str='.*', type:str='.*', date:str='.*', ext:str='tif') -> str:
     regex = fr'^.*{city}/.*/{type}_{date}\.{ext}$'
     return regex
 
-def extract(files:list, pattern:str=r'\d{4}-\d{2}-\d{2}') -> list:
+def extract(files:list, pattern:str=r'\d{4}_\d{2}_\d{2}') -> list:
     regex = re.compile(pattern)
     match = np.array([regex.search(file).group() for file in files])
     return match
@@ -338,7 +338,7 @@ def optimise(model:nn.Module, loader, device:torch.device, criterion, optimiser,
         accuracy.update(Y[subset], Yh[subset] > .5)
         auroc.update(Y[subset], Yh[subset])
         # Print statistics
-        print(f'{'Training': <10} | Batch {i+1:03d}/{len(loader):03d} | Accuracy {accuracy.compute().item():.4f} | Auroc {auroc.compute().item():.4f}', end='\r' if i+1 < len(loader) else '\n')
+        print(f'Training: <10 | Batch {i+1:03d}/{len(loader):03d} | Accuracy {accuracy.compute().item():.4f} | Auroc {auroc.compute().item():.4f}', end='\r' if i+1 < len(loader) else '\n')
     return run_loss / n_obs
 
 def validate(model:nn.Module, loader, device:torch.device, criterion, threshold:float=0.5) -> torch.Tensor:
@@ -359,7 +359,7 @@ def validate(model:nn.Module, loader, device:torch.device, criterion, threshold:
             accuracy.update(Y[subset], Yh[subset] > .5)
             auroc.update(Y[subset], Yh[subset])
             # Print statistics
-            print(f'{'Validation': <10} | Batch {i+1:03d}/{len(loader):03d} | Accuracy {accuracy.compute().item():.4f} | Auroc {auroc.compute().item():.4f}', end='\r' if i+1 < len(loader) else '\n')
+            print(f'Validation: <10 | Batch {i+1:03d}/{len(loader):03d} | Accuracy {accuracy.compute().item():.4f} | Auroc {auroc.compute().item():.4f}', end='\r' if i+1 < len(loader) else '\n')
         return run_loss / n_obs
 
 def predict(model:nn.Module, loader, device:torch.device, n_batches:int=None) -> tuple:
