@@ -15,13 +15,22 @@ import pandas as pd
 import rasterio
 import satlaspretrain_models
 import zarr
+import argparse
 
 from numpy import random
 from destruction_utilities import *
 
+# Define argument parser
+parser = argparse.ArgumentParser()
+parser.add_argument('--city', type=str, default='aleppo', help='City name')
+
+# Parse command-line arguments
+args = parser.parse_args()
+
+
 # Utilities
 params = argparse.Namespace(
-    city='aleppo', 
+    city=args.city, 
     tile_size=128, 
     train_size=0.50, valid_size=0.25, test_size=0.25,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})

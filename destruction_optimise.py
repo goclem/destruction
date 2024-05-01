@@ -19,10 +19,20 @@ from torch import optim, nn, utils
 from os import path
 from sklearn import metrics
 
+# Define argument parser
+parser = argparse.ArgumentParser()
+parser.add_argument('--cities', nargs='+', type=str, default=['aleppo'], help='List of city names')
+
+# Parse command-line arguments
+args = parser.parse_args()
+
+print(args.cities)
+
 # Utilities
 device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
+print(device)
 params = argparse.Namespace(
-    cities=['aleppo'],
+    cities=args.cities,
     tile_size=128, 
     batch_size=16, 
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
