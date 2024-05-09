@@ -6,4 +6,6 @@
 # Date: 2024-05-01
 # Version: 1.0
 
-python3 destruction_optimise.py --cities moschun aleppo volnovakha
+# python3 destruction_optimise.py --cities moschun aleppo volnovakha
+
+python3 destruction_optimise.py --cities hostomel irpin kharkiv livoberezhnyi moschun rubizhne volnovakha aleppo damascus daraa deirezzor hama homs idlib raqqa

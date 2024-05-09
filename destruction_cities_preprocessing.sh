@@ -6,7 +6,8 @@
 # Date: 2024-05-01
 # Version: 1.0
 
-declare -a Cities=("aleppo" "moschun" "volnovakha")
+declare -a Cities=("hostomel" "irpin" "kharkiv" "livoberezhnyi" "moschun" "rubizhne" "volnovakha" "aleppo" "damascus" "daraa" "deirezzor" "hama" "homs" "idlib" "raqqa")
+
 
 for city in "${Cities[@]}"; do
     echo "Preprocessing" $city
