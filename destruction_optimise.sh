@@ -8,4 +8,4 @@
 
 # python3 destruction_optimise.py --cities moschun aleppo volnovakha
 
-python3 destruction_optimise.py --cities hostomel irpin livoberezhnyi moschun rubizhne volnovakha aleppo damascus daraa deirezzor hama homs idlib raqqa
+python3 destruction_optimise.py --cities hostomel irpin livoberezhnyi moschun volnovakha aleppo damascus daraa deirezzor hama homs idlib raqqa
