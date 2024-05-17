@@ -167,7 +167,7 @@ def sample_split(images:np.ndarray, samples:np.ndarray) -> list:
     
 def display(image:torch.Tensor, title:str='', cmap:str='gray', channel_first:bool=True) -> None:
     '''Displays an image'''
-    if isinstance(images, np.ndarray):
+    if isinstance(image, np.ndarray):
         image = torch.from_numpy(image)
     if channel_first:
         image = image.permute(1, 2, 0)
@@ -265,7 +265,7 @@ class BceLoss(nn.Module):
         loss = nn.functional.binary_cross_entropy(inputs[subset], targets[subset], reduction='none')
         if self.focal:
             loss = self.alpha * (1 - torch.exp(-loss))**self.gamma * loss
-        loss = torch.mean(loss)
+        loss = torch.mean(loss) #? Mean weighted by number of non-missing
         return loss
 
 def shuffle_zarr(images_zarr:str, labels_zarr:str) -> None:

@@ -23,33 +23,9 @@ from sklearn import metrics
 device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
 params = argparse.Namespace(
     cities=['aleppo'],
-    tile_size=128, 
+    tile_size=128,
     batch_size=16, 
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
-
-#%% EXPERIMENT
-
-batch_size    = 16
-digits        = np.array([0, 0, 0], dtype=float)
-
-dataset_sizes = np.array([100, 25, 1])
-slice_sizes = (dataset_sizes / dataset_sizes.sum() * batch_size).round()
-
-dataset_sizes = dataset_sizes / dataset_sizes.sum()
-dataset_sizes = dataset_sizes + digits
-digits        = dataset_sizes % 1
-slice_sizes   = (dataset_sizes * batch_size).round()
-print(digits)
-print(slice_sizes)
-
-
-
-
-
-
-
-
-
 
 #%% INITIALISES DATA LOADERS
 
@@ -95,7 +71,7 @@ del image_encoder, sequence_encoder, prediction_head
 #%% OPITIMISES PARAMETERS
 
 #? Loads previous checkpoint
-# model = torch.load(f'{paths.models}/ModelWrapper_best.pth')
+model = torch.load(f'{paths.models}/ModelWrapper_best.pth')
 
 #? Parameter alignment i.e. freezes image encoder's parameters
 set_trainable(model.image_encoder.feature_extractor, False)
@@ -110,7 +86,7 @@ optimiser = optim.AdamW(model.parameters(), lr=1e-5)
 count_parameters(model)
 '''
 
-def train(model:nn.Module, train_loader, valid_loader, device:torch.device, criterion, optimiser, n_epochs:int=1, patience:int=1, accumulate:int=1):
+def train(model:nn.Module, train_loader, valid_loader, device:torch.device, criterion, optimiser, n_epochs:int=1, patience:int=1, accumulate:int=1, label:str=''):
     '''Trains a model using a training and validation sample'''
     best_loss, counter = torch.tensor(float('inf')), 0
     for epoch in range(n_epochs):
@@ -121,7 +97,7 @@ def train(model:nn.Module, train_loader, valid_loader, device:torch.device, crit
         if valid_loss < best_loss:
             best_loss = valid_loss
             counter = 0
-            torch.save(model, f'{paths.models}/{model.__class__.__name__}_best.pth')
+            torch.save(model, f'{paths.models}/{model.__class__.__name__}_{label}_best.pth')
             # Shuffles zarr datasets
             for city in params.cities:
                 shuffle_zarr(**train_datasets[city])
