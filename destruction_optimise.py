@@ -27,6 +27,30 @@ params = argparse.Namespace(
     batch_size=16, 
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
 
+#%% EXPERIMENT
+
+batch_size    = 16
+digits        = np.array([0, 0, 0], dtype=float)
+
+dataset_sizes = np.array([100, 25, 1])
+slice_sizes = (dataset_sizes / dataset_sizes.sum() * batch_size).round()
+
+dataset_sizes = dataset_sizes / dataset_sizes.sum()
+dataset_sizes = dataset_sizes + digits
+digits        = dataset_sizes % 1
+slice_sizes   = (dataset_sizes * batch_size).round()
+print(digits)
+print(slice_sizes)
+
+
+
+
+
+
+
+
+
+
 #%% INITIALISES DATA LOADERS
 
 # Datasets
