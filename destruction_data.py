@@ -49,6 +49,12 @@ noanalysis = rasterise(source=noanalysis, profile=profile, update=dict(dtype='ui
 analysis   = np.logical_and(settlement, np.invert(noanalysis))
 del image, settlement, noanalysis
 
+# Check nodata value and put to None
+if profile['nodata'] is not None:
+    print(f"{params.city} - nodata: {profile['nodata']}")
+    print("changed to None")
+    profile['nodata'] = None
+
 # Splits samples
 random.seed(0)
 index = dict(train=params.train_size, valid=params.valid_size, test=params.test_size)
