@@ -49,6 +49,9 @@ for i in range(5):
 del X, Y
 ''' 
 
+# Prints excluded cities
+[print(f'Excluding: {city}') for city, size in zip(params.cities, train_loader.slice_sizes) if size == 0]
+
 #%% INTIALISES MODEL
 
 # Initialises model components
@@ -71,7 +74,8 @@ del image_encoder, sequence_encoder, prediction_head
 #%% OPITIMISES PARAMETERS
 
 #? Loads previous checkpoint
-model = torch.load(f'{paths.models}/ModelWrapper_best.pth')
+if path.exists(f'{paths.models}/ModelWrapper_best.pth'):
+    model = torch.load(f'{paths.models}/ModelWrapper_best.pth')
 
 #? Parameter alignment i.e. freezes image encoder's parameters
 set_trainable(model.image_encoder.feature_extractor, False)
