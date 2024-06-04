@@ -17,7 +17,7 @@ from destruction_models import *
 from destruction_utilities import *
 from torch import optim, nn, utils
 from os import path
-from sklearn import metrics
+from torcheval import metrics
 
 # Utilities
 device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
