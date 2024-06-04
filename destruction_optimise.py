@@ -24,7 +24,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.ba
 params = argparse.Namespace(
     cities=['aleppo', 'moschun'],
     tile_size=128,
-    batch_size=16, 
+    batch_size=16,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
 
 #%% INITIALISES DATA LOADERS
@@ -80,12 +80,6 @@ count_parameters(model)
 optimiser = optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
 criterion = BceLoss(focal=False, drop_nan=True, alpha=0.25, gamma=2.0)
 
-''' #? Fine tuning i.e. unfreezes image encoder's parameters
-set_trainable(model.image_encoder.feature_extractor, True)
-optimiser = optim.AdamW(model.parameters(), lr=1e-5)
-count_parameters(model)
-'''
-
 def train(model:nn.Module, train_loader, valid_loader, device:torch.device, criterion, optimiser, n_epochs:int=1, patience:int=1, accumulate:int=1, label:str=''):
     '''Trains a model using a training and validation sample'''
     best_loss, counter = torch.tensor(float('inf')), 0
@@ -117,7 +111,27 @@ train(model=model,
       optimiser=optimiser, 
       n_epochs=25, 
       patience=3,
-      accumulate=4)
+      accumulate=2)
+
+# Clears GPU memory
+empty_cache(device)
+
+#%% FINE TUNES PARAMETERS
+
+#? Fine tuning i.e. unfreezes image encoder's parameters
+set_trainable(model.image_encoder.feature_extractor, True)
+optimiser = optim.AdamW(model.parameters(), lr=1e-5)
+count_parameters(model)
+
+train(model=model, 
+      train_loader=train_loader, 
+      valid_loader=valid_loader, 
+      device=device, 
+      criterion=criterion, 
+      optimiser=optimiser, 
+      n_epochs=25, 
+      patience=3,
+      accumulate=2)
 
 # Clears GPU memory
 empty_cache(device)
