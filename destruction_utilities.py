@@ -225,8 +225,10 @@ class ZarrDataLoader:
 
     def compute_slice_sizes(self):
         dataset_sizes    = torch.tensor([len(dataset) for dataset in self.datasets])
-        self.slice_sizes = (dataset_sizes / dataset_sizes.sum() * self.batch_size).round().int()
-        self.n_batches   = (dataset_sizes // self.slice_sizes).min()
+        self.slice_sizes = (torch.div(dataset_sizes, dataset_sizes.sum()) * self.batch_size).round().int()
+        self.n_batches   = torch.zeros_like(dataset_sizes)
+        index = self.n_batches > 0
+        self.n_batches[index] = torch.floor_divide(dataset_sizes[index], slice_sizes[index])
     
     def pad_sequence(self, sequence:torch.Tensor, value:int, seq_len:int=None, dim:int=1) -> torch.Tensor:
         pad = torch.zeros(2*len(sequence.size()), dtype=int)

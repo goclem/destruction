@@ -22,7 +22,7 @@ from sklearn import metrics
 # Utilities
 device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
 params = argparse.Namespace(
-    cities=['aleppo'],
+    cities=['aleppo', 'moschun'],
     tile_size=128,
     batch_size=16, 
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
