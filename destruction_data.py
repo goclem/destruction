@@ -21,23 +21,22 @@ from destruction_utilities import *
 
 # Utilities
 params = argparse.Namespace(
-    city='aleppo', 
+    city='moschun', 
     tile_size=128, 
     train_size=0.50, valid_size=0.25, test_size=0.25,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
 
 #%% COMPUTES SAMPLES
 
-# Loads data
-image      = search_data(pattern=pattern(city=params.city, type='image'))[0]
-settlement = search_data(pattern=f'{params.city}_noanalysis.*gpkg$')[0]
-
 # Computes analysis zone
-profile    = tiled_profile(image, tile_size=params.tile_size)
+profile    = search_data(pattern=pattern(city=params.city, type='image'))[0]
+profile    = tiled_profile(profile, tile_size=params.tile_size)
+settlement = search_data(pattern=f'{params.city}_settlement.*gpkg$')[0]
 settlement = rasterise(source=settlement, profile=profile, update=dict(dtype='uint8')).astype(bool)
+noanalysis = search_data(pattern=f'{params.city}_noanalysis.*gpkg$')[0]
 noanalysis = rasterise(source=noanalysis, profile=profile, update=dict(dtype='uint8')).astype(bool)
 analysis   = np.logical_and(settlement, np.invert(noanalysis))
-del image, settlement, noanalysis
+del profile, settlement, noanalysis
 
 # Splits samples
 random.seed(0)
@@ -56,7 +55,7 @@ damage = gpd.read_file(damage)
 
 # Extract images dates
 dates = search_data(pattern=pattern(city=params.city, type='image'))
-dates = extract(dates, r'\d{4}-\d{2}-\d{2}')
+dates = extract(dates, r'\d{4}_\d{2}_\d{2}')
 
 # Adds images dates to damage dataset
 damage[list(set(dates) - set(damage.columns))] = np.nan
