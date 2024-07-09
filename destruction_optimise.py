@@ -34,7 +34,7 @@ print(device)
 params = argparse.Namespace(
     cities=args.cities,
     tile_size=128, 
-    batch_size=16, 
+    batch_size=8, 
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
 
 #%% INITIALISES DATA LOADERS
@@ -122,6 +122,26 @@ def train(model:nn.Module, train_loader, valid_loader, device:torch.device, crit
 # Test
 
 # Training
+train(model=model, 
+      train_loader=train_loader, 
+      valid_loader=valid_loader, 
+      device=device, 
+      criterion=criterion, 
+      optimiser=optimiser, 
+      n_epochs=25, 
+      patience=3,
+      accumulate=4)
+
+# Clears GPU memory
+empty_cache(device)
+
+#%% FINE TUNES ENTIRE MODEL
+
+#? Fine tuning i.e. unfreezes image encoder's parameters
+set_trainable(model.image_encoder.feature_extractor, True)
+optimiser = optim.AdamW(model.parameters(), lr=1e-5)
+count_parameters(model)
+
 train(model=model, 
       train_loader=train_loader, 
       valid_loader=valid_loader, 
