@@ -120,7 +120,7 @@ train(model=model,
 # Clears GPU memory
 empty_cache(device)
 
-#%% FINE TUNES PARAMETERS
+#%% FINE TUNES ENTIRE MODEL
 
 #? Fine tuning i.e. unfreezes image encoder's parameters
 set_trainable(model.image_encoder.feature_extractor, True)
