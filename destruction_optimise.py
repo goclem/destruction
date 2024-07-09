@@ -86,6 +86,8 @@ del image_encoder, sequence_encoder, prediction_head
 set_trainable(model.image_encoder.feature_extractor, False)
 count_parameters(model)
 
+
+
 optimiser = optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
 criterion = BceLoss(focal=False, drop_nan=True, alpha=0.25, gamma=2.0)
 
@@ -116,6 +118,8 @@ def train(model:nn.Module, train_loader, valid_loader, device:torch.device, crit
             if counter >= patience:
                 print('- Early stopping')
                 break
+
+# Test
 
 # Training
 train(model=model, 
