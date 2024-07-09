@@ -24,7 +24,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.ba
 params = argparse.Namespace(
     cities=['aleppo', 'moschun'],
     tile_size=128,
-    batch_size=16,
+    batch_size=8,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
 
 #%% INITIALISES DATA LOADERS
@@ -115,7 +115,7 @@ train(model=model,
       optimiser=optimiser, 
       n_epochs=25, 
       patience=3,
-      accumulate=2)
+      accumulate=4)
 
 # Clears GPU memory
 empty_cache(device)
@@ -135,7 +135,7 @@ train(model=model,
       optimiser=optimiser, 
       n_epochs=25, 
       patience=3,
-      accumulate=2)
+      accumulate=4)
 
 # Clears GPU memory
 empty_cache(device)
