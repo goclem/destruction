@@ -126,7 +126,8 @@ train(model=model,
       optimiser=optimiser, 
       n_epochs=25, 
       patience=3,
-      accumulate=4)
+      accumulate=4,
+      label='aligmnent')
 
 # Clears GPU memory
 empty_cache(device)
@@ -134,7 +135,9 @@ empty_cache(device)
 #%% FINE TUNES ENTIRE MODEL
 
 #? Fine tuning i.e. unfreezes image encoder's parameters
+model = torch.load(f'{paths.models}/ModelWrapper_aligmnent_best.pth') # Loads best model
 set_trainable(model.image_encoder.feature_extractor, True)
+
 optimiser = optim.AdamW(model.parameters(), lr=1e-5)
 count_parameters(model)
 
@@ -146,12 +149,15 @@ train(model=model,
       optimiser=optimiser, 
       n_epochs=25, 
       patience=3,
-      accumulate=4)
+      accumulate=4,
+      label='finetuning')
 
 # Clears GPU memory
 empty_cache(device)
 
 #%% ESTIMATES THRESHOLD
+
+model = torch.load(f'{paths.models}/ModelWrapper_finetuning_best.pth') # Loads best model
 
 def compute_threshold(model:nn.Module, loader, device:torch.device, n_batches:int=None) -> float:
     '''Estimates threshold for binary classification'''
