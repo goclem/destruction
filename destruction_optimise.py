@@ -17,7 +17,7 @@ from destruction_models import *
 from destruction_utilities import *
 from torch import optim, nn, utils
 from os import path
-from sklearn import metrics
+from torcheval import metrics
 
 # Define argument parser
 parser = argparse.ArgumentParser()
@@ -58,6 +58,9 @@ for i in range(5):
 del X, Y
 ''' 
 
+# Prints excluded cities
+[print(f'Excluding: {city}') for city, size in zip(params.cities, train_loader.slice_sizes) if size == 0]
+
 #%% INTIALISES MODEL
 
 # Initialises model components
@@ -77,10 +80,11 @@ count_parameters(model.sequence_encoder)
 
 del image_encoder, sequence_encoder, prediction_head
 
-#%% OPITIMISES PARAMETERS
+#%% ALIGNING PARAMETERS
 
 #? Loads previous checkpoint
-# model = torch.load(f'{paths.models}/ModelWrapper_best.pth')
+if path.exists(f'{paths.models}/ModelWrapper_best.pth'):
+    model = torch.load(f'{paths.models}/ModelWrapper_best.pth')
 
 #? Parameter alignment i.e. freezes image encoder's parameters
 set_trainable(model.image_encoder.feature_extractor, False)
@@ -89,13 +93,7 @@ count_parameters(model)
 optimiser = optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
 criterion = BceLoss(focal=False, drop_nan=True, alpha=0.25, gamma=2.0)
 
-''' #? Fine tuning i.e. unfreezes image encoder's parameters
-set_trainable(model.image_encoder.feature_extractor, True)
-optimiser = optim.AdamW(model.parameters(), lr=1e-5)
-count_parameters(model)
-'''
-
-def train(model:nn.Module, train_loader, valid_loader, device:torch.device, criterion, optimiser, n_epochs:int=1, patience:int=1, accumulate:int=1):
+def train(model:nn.Module, train_loader, valid_loader, device:torch.device, criterion, optimiser, n_epochs:int=1, patience:int=1, accumulate:int=1, label:str=''):
     '''Trains a model using a training and validation sample'''
     best_loss, counter = torch.tensor(float('inf')), 0
     for epoch in range(n_epochs):
@@ -106,7 +104,7 @@ def train(model:nn.Module, train_loader, valid_loader, device:torch.device, crit
         if valid_loss < best_loss:
             best_loss = valid_loss
             counter = 0
-            torch.save(model, f'{paths.models}/{model.__class__.__name__}_best.pth')
+            torch.save(model, f'{paths.models}/{model.__class__.__name__}_{label}_best.pth')
             # Shuffles zarr datasets
             for city in params.cities:
                 shuffle_zarr(**train_datasets[city])
@@ -157,7 +155,7 @@ empty_cache(device)
 
 def compute_threshold(model:nn.Module, loader, device:torch.device, n_batches:int=None) -> float:
     '''Estimates threshold for binary classification'''
-    Y, Yh = predict(model, loader=train_loader, device=device, n_batches=n_batches)
+    Y, Yh  = predict(model, loader=train_loader, device=device, n_batches=n_batches)
     subset = ~Y.isnan()
     fpr, tpr, thresholds = metrics.roc_curve(Y[subset].cpu(), Yh[subset].cpu())
     threshold = thresholds[np.argmax(tpr - fpr)]

@@ -167,7 +167,7 @@ def sample_split(images:np.ndarray, samples:np.ndarray) -> list:
     
 def display(image:torch.Tensor, title:str='', cmap:str='gray', channel_first:bool=True) -> None:
     '''Displays an image'''
-    if isinstance(images, np.ndarray):
+    if isinstance(image, np.ndarray):
         image = torch.from_numpy(image)
     if channel_first:
         image = image.permute(1, 2, 0)
@@ -228,8 +228,9 @@ class ZarrDataLoader:
 
     def compute_slice_sizes(self):
         dataset_sizes    = torch.tensor([len(dataset) for dataset in self.datasets])
-        self.slice_sizes = (dataset_sizes / dataset_sizes.sum() * self.batch_size).round().int()
-        self.n_batches   = (dataset_sizes // self.slice_sizes).min()
+        self.slice_sizes = (torch.div(dataset_sizes, dataset_sizes.sum()) * self.batch_size).round().int()
+        self.n_batches   = np.divide(dataset_sizes, self.slice_sizes, where=self.slice_sizes > 0).floor().int()
+        self.n_batches   = self.n_batches[self.n_batches > 0].min()
     
     def pad_sequence(self, sequence:torch.Tensor, value:int, seq_len:int=None, dim:int=1) -> torch.Tensor:
         pad = torch.zeros(2*len(sequence.size()), dtype=int)
@@ -307,7 +308,7 @@ class BceLoss(nn.Module):
         loss = nn.functional.binary_cross_entropy(inputs[subset], targets[subset], reduction='none')
         if self.focal:
             loss = self.alpha * (1 - torch.exp(-loss))**self.gamma * loss
-        loss = torch.mean(loss)
+        loss = torch.mean(loss) #? Mean weighted by number of non-missing
         return loss
 
 def shuffle_zarr(images_zarr:str, labels_zarr:str) -> None:

@@ -37,17 +37,15 @@ params = argparse.Namespace(
 
 #%% COMPUTES SAMPLES
 
-# Loads data
-image      = search_data(pattern=pattern(city=params.city, type='image'))[0]
-noanalysis = search_data(pattern=f'{params.city}_noanalysis.*gpkg$')[0]
-settlement = search_data(pattern=f'{params.city}_settlement.*gpkg$')[0]
-
 # Computes analysis zone
-profile    = tiled_profile(image, tile_size=params.tile_size)
+profile    = search_data(pattern=pattern(city=params.city, type='image'))[0]
+profile    = tiled_profile(profile, tile_size=params.tile_size)
+settlement = search_data(pattern=f'{params.city}_settlement.*gpkg$')[0]
 settlement = rasterise(source=settlement, profile=profile, update=dict(dtype='uint8')).astype(bool)
+noanalysis = search_data(pattern=f'{params.city}_noanalysis.*gpkg$')[0]
 noanalysis = rasterise(source=noanalysis, profile=profile, update=dict(dtype='uint8')).astype(bool)
 analysis   = np.logical_and(settlement, np.invert(noanalysis))
-del image, settlement, noanalysis
+del profile, settlement, noanalysis
 
 # Check nodata value and put to None
 if profile['nodata'] is not None:
