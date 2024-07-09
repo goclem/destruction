@@ -71,7 +71,7 @@ count_parameters(model.sequence_encoder)
 
 del image_encoder, sequence_encoder, prediction_head
 
-#%% OPITIMISES PARAMETERS
+#%% ALIGNING PARAMETERS
 
 #? Loads previous checkpoint
 if path.exists(f'{paths.models}/ModelWrapper_best.pth'):
@@ -144,7 +144,7 @@ empty_cache(device)
 
 def compute_threshold(model:nn.Module, loader, device:torch.device, n_batches:int=None) -> float:
     '''Estimates threshold for binary classification'''
-    Y, Yh = predict(model, loader=train_loader, device=device, n_batches=n_batches)
+    Y, Yh  = predict(model, loader=train_loader, device=device, n_batches=n_batches)
     subset = ~Y.isnan()
     fpr, tpr, thresholds = metrics.roc_curve(Y[subset].cpu(), Yh[subset].cpu())
     threshold = thresholds[np.argmax(tpr - fpr)]
