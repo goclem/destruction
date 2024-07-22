@@ -73,9 +73,10 @@ del image_encoder, sequence_encoder, prediction_head
 
 #%% ALIGNING PARAMETERS
 
-#? Loads previous checkpoint
+''' #? Loads previous checkpoint
 if path.exists(f'{paths.models}/ModelWrapper_best.pth'):
     model = torch.load(f'{paths.models}/ModelWrapper_best.pth')
+'''
 
 #? Parameter alignment i.e. freezes image encoder's parameters
 set_trainable(model.image_encoder.feature_extractor, False)
