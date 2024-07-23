@@ -28,8 +28,10 @@ class ImageEncoder(nn.Module):
         n, t, d, h, w = X.size()
         H = X.view(n*t, d, h, w)        
         H = self.feature_extractor(H)
+        H = H[1:] # This is because Dominik's model has five outputs
         H = [layer(h) for layer, h in zip(self.downscale_layers, H)]
-        H = [h.view(n, t, -1) for h in H]
+        #H = [h.view(n, t, -1) for h in H]
+        H = [h.reshape(n, t, -1) for h in H]
         H = torch.cat(H, dim=-1)
         H = self.layer_norm(H)
         return H
