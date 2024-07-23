@@ -30,7 +30,8 @@ from torcheval import metrics
 
 home  = os.path.expanduser('~')
 paths = argparse.Namespace(
-    data='/lustre/ific.uv.es/ml/iae091/data',
+    # data='/lustre/ific.uv.es/ml/iae091/data', # Artemisa
+    data = '../data', # local Dominik
     models='../models',
     figures='../figures',
     desktop=os.path.join(home, 'Desktop'),

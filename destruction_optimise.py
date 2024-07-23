@@ -3,7 +3,7 @@
 '''
 @description: Model optimisation for the destruction project
 @authors: Clement Gorin, Dominik Wielath
-@contact: clement.gorin@univ-paris1.fr
+@contact: clement.gorin@univ-paris1.fr, dominik.wielath@upf.edu
 '''
 
 #%% HEADER

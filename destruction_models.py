@@ -26,7 +26,7 @@ class ImageEncoder(nn.Module):
     
     def forward(self, X:torch.Tensor) -> torch.Tensor:
         n, t, d, h, w = X.size()
-        H = X.view(n*t, d, h, w)
+        H = X.view(n*t, d, h, w)        
         H = self.feature_extractor(H)
         H = [layer(h) for layer, h in zip(self.downscale_layers, H)]
         H = [self.adaptive_pooling(h) for h in H]
@@ -69,8 +69,8 @@ class SequenceEncoder(nn.Module):
 
     def forward(self, H:torch.Tensor) -> torch.Tensor:
         t = H.size(1) # n x t x d
-        P = self.positional_encoding[:, :t, :].to(H.device)
-        M = self.attention_mask[:t, :t].to(H.device)
+        P = self.positional_encoding[:, :t, :].to(H.device)        
+        M = self.attention_mask[:t, :t].to(H.device)        
         H = self.transformer(H + P, M)
         return H
     
