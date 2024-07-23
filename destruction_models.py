@@ -20,7 +20,7 @@ class ImageEncoder(nn.Module):
     def __init__(self, feature_extractor:nn.Module):
         super().__init__()
         self.feature_extractor = feature_extractor
-        self.downscale_layers  = nn.ModuleList([nn.Conv2d(128, 128, kernel_size=ks, stride=ks, groups=128) for ks in [8, 4, 2, 1]])
+        self.downscale_layers  = nn.ModuleList([nn.Conv2d(128, 8, kernel_size=ks, stride=ks) for ks in [8, 4, 2, 1]])
         self.adaptive_pooling  = nn.AdaptiveMaxPool2d((1, 1))
         self.layer_norm        = nn.LayerNorm(512)
     
@@ -29,8 +29,8 @@ class ImageEncoder(nn.Module):
         H = X.view(n*t, d, h, w)        
         H = self.feature_extractor(H)
         H = [layer(h) for layer, h in zip(self.downscale_layers, H)]
-        H = [self.adaptive_pooling(h) for h in H]
-        H = torch.cat(H, dim=1).view(n, t, -1)
+        H = [h.view(n, t, -1) for h in H]
+        H = torch.cat(H, dim=-1)
         H = self.layer_norm(H)
         return H
 
@@ -106,6 +106,8 @@ class ModelWrapper(nn.Module):
 #%% TESTS MODEL COMPONENTS
 
 '''
+from destruction_utilities import *
+
 # Initialises model components
 image_encoder    = ImageEncoder(feature_extractor=torch.load(f'{paths.models}/Aerial_SwinB_SI.pth'))
 sequence_encoder = dict(input_dim=512, max_length=25, n_heads=4, hidden_dim=512, n_layers=4, dropout=0.0)
@@ -125,19 +127,12 @@ print(X.size(), Y.size())
 display_sequence(X[0], Y[0], grid_size=(5,5))
 
 # Tests model components
-
 with torch.no_grad():
     H = image_encoder(X)
     H = sequence_encoder(H)
     Y = prediction_head(H)
 
-# Tests model components
-with torch.no_grad():
-    H = model.image_encoder(X.to(device))
-    H = model.sequence_encoder(H)
-    Y = model.prediction_head(H)
-
 # Tests full model
 with torch.no_grad():
-    Y = model(X.to(device))
+    Y = model(X)
 '''
