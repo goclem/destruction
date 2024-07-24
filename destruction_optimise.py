@@ -55,10 +55,12 @@ del X, Y
 #%% INTIALISES MODEL
 
 # Initialises model components
-image_encoder    = ImageEncoder(feature_extractor=torch.load(f'{paths.models}/Aerial_SwinB_SI.pth'))
-sequence_encoder = dict(input_dim=512, max_length=25, n_heads=4, hidden_dim=512, n_layers=4, dropout=0.0)
-sequence_encoder = SequenceEncoder(**sequence_encoder)
-prediction_head  = PredictionHead(input_dim=512, output_dim=1)
+#? feature_extractor = torch.load(f'{paths.models}/Aerial_SwinB_SI.pth')
+feature_extractor = ResNextExtractor()
+image_encoder     = ImageEncoder(feature_extractor=feature_extractor)
+sequence_encoder  = dict(input_dim=512, max_length=25, n_heads=4, hidden_dim=512, n_layers=2, dropout=0.0)
+sequence_encoder  = SequenceEncoder(**sequence_encoder)
+prediction_head   = PredictionHead(input_dim=512, output_dim=1)
 
 # Initialises model wrapper
 model = ModelWrapper(image_encoder, sequence_encoder, prediction_head)
@@ -79,8 +81,8 @@ if path.exists(f'{paths.models}/ModelWrapper_best.pth'):
 '''
 
 #? Parameter alignment i.e. freezes image encoder's parameters
-set_trainable(model.image_encoder.feature_extractor, False)
-count_parameters(model)
+# set_trainable(model.image_encoder.feature_extractor, False)
+# count_parameters(model)
 
 optimiser = optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
 criterion = BceLoss(focal=False, drop_nan=True, alpha=0.25, gamma=2.0)
