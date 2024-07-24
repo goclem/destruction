@@ -56,7 +56,7 @@ del X, Y
 
 # Initialises model components
 #? feature_extractor = torch.load(f'{paths.models}/Aerial_SwinB_SI.pth')
-feature_extractor = ResNextExtractor()
+feature_extractor = ResNextExtractor(dropout=0.0)
 image_encoder     = ImageEncoder(feature_extractor=feature_extractor)
 sequence_encoder  = dict(input_dim=512, max_length=25, n_heads=4, hidden_dim=512, n_layers=2, dropout=0.0)
 sequence_encoder  = SequenceEncoder(**sequence_encoder)

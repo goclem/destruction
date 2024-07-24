@@ -17,7 +17,7 @@ from torch import nn
 #%% FEATURE EXTRACTOR
 
 class ResNeXtBlock(nn.Module):
-    def __init__(self, input_dim, output_dim, stride=2, cardinality=32, base_width=4):
+    def __init__(self, input_dim=128, output_dim=128, stride=2, cardinality=32, base_width=4, dropout=0.0):
         super(ResNeXtBlock, self).__init__()
         hidden_dim = cardinality * base_width
         # 1x1 convolutional layer to reduce dimensions
@@ -37,6 +37,8 @@ class ResNeXtBlock(nn.Module):
                 nn.BatchNorm2d(output_dim)
             )
         self._initialize_weights()
+        # Dropout layer
+        self.dropout = nn.Dropout(dropout)
 
     def _initialize_weights(self):
         for module in self.modules():
@@ -57,16 +59,17 @@ class ResNeXtBlock(nn.Module):
         H = self.norm3(H)
         H += self.shortcut(X)
         Y = torch.relu(H)
+        Y = self.dropout(Y)
         return Y
 
 class ResNextExtractor(nn.Module):
-    def __init__(self):
+    def __init__(self, dropout=0.0):
         super(ResNextExtractor, self).__init__()
-        self.block0 = ResNeXtBlock(input_dim=3,   output_dim=128, stride=2, cardinality=32) # 128x128x3 > 64x64x64
-        self.block1 = ResNeXtBlock(input_dim=128, output_dim=128, stride=2, cardinality=32) # 64x64x64  > 32x32x128
-        self.block2 = ResNeXtBlock(input_dim=128, output_dim=128, stride=2, cardinality=32) # 32x32x128 > 16x16x128
-        self.block3 = ResNeXtBlock(input_dim=128, output_dim=128, stride=2, cardinality=32) # 16x16x128 > 8x8x128
-        self.block4 = ResNeXtBlock(input_dim=128, output_dim=128, stride=2, cardinality=32) # 8x8x128   > 4x4x128
+        self.block0 = ResNeXtBlock(input_dim=3,   output_dim=128, stride=2, cardinality=32, dropout=dropout) # 128x128x3 > 64x64x64
+        self.block1 = ResNeXtBlock(input_dim=128, output_dim=128, stride=2, cardinality=32, dropout=dropout) # 64x64x64  > 32x32x128
+        self.block2 = ResNeXtBlock(input_dim=128, output_dim=128, stride=2, cardinality=32, dropout=dropout) # 32x32x128 > 16x16x128
+        self.block3 = ResNeXtBlock(input_dim=128, output_dim=128, stride=2, cardinality=32, dropout=dropout) # 16x16x128 > 8x8x128
+        self.block4 = ResNeXtBlock(input_dim=128, output_dim=128, stride=2, cardinality=32, dropout=dropout) # 8x8x128   > 4x4x128
         
     def forward(self, X):
         H0 = self.block0(X)
