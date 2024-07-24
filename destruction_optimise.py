@@ -119,13 +119,14 @@ train(model=model,
       n_epochs=25, 
       patience=3,
       accumulate=4,
-      label='aligmnent')
+      label='resnext_encoder')
 
 # Clears GPU memory
 empty_cache(device)
 
 #%% FINE TUNES ENTIRE MODEL
 
+'''
 #? Fine tuning i.e. unfreezes image encoder's parameters
 model = torch.load(f'{paths.models}/ModelWrapper_aligmnent_best.pth') # Loads best model
 set_trainable(model.image_encoder.feature_extractor, True)
@@ -146,6 +147,7 @@ train(model=model,
 
 # Clears GPU memory
 empty_cache(device)
+'''
 
 #%% ESTIMATES THRESHOLD
 
