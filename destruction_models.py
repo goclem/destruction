@@ -14,6 +14,71 @@ import torch
 
 from torch import nn
 
+#%% FEATURE EXTRACTOR
+
+class ResNeXtBlock(nn.Module):
+    def __init__(self, input_dim=128, output_dim=128, stride=2, cardinality=32, base_width=4, dropout=0.0):
+        super(ResNeXtBlock, self).__init__()
+        hidden_dim = cardinality * base_width
+        # 1x1 convolutional layer to reduce dimensions
+        self.conv1 = nn.Conv2d(input_dim, hidden_dim, kernel_size=1, bias=False)
+        self.norm1 = nn.BatchNorm2d(hidden_dim)
+        # 3x3 grouped convolutional layer
+        self.conv2 = nn.Conv2d(hidden_dim, hidden_dim, kernel_size=3, stride=stride, padding=1, groups=cardinality, bias=False)
+        self.norm2 = nn.BatchNorm2d(hidden_dim)
+        # 1x1 convolutional layer to expand dimensions
+        self.conv3 = nn.Conv2d(hidden_dim, output_dim, kernel_size=1, bias=False)
+        self.norm3 = nn.BatchNorm2d(output_dim)
+        # Shortcut connection
+        self.shortcut = nn.Sequential()
+        if stride != 1 or input_dim != output_dim:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(input_dim, output_dim, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(output_dim)
+            )
+        self._initialize_weights()
+        # Dropout layer
+        self.dropout = nn.Dropout(dropout)
+
+    def _initialize_weights(self):
+        for module in self.modules():
+            if isinstance(module, nn.Conv2d):
+                nn.init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(module, nn.BatchNorm2d):
+                nn.init.constant_(module.weight, 1)
+                nn.init.constant_(module.bias, 0)
+
+    def forward(self, X):
+        H = self.conv1(X)
+        H = self.norm1(H)
+        H = torch.relu(H)
+        H = self.conv2(H)
+        H = self.norm2(H)
+        H = torch.relu(H)
+        H = self.conv3(H)
+        H = self.norm3(H)
+        H += self.shortcut(X)
+        Y = torch.relu(H)
+        Y = self.dropout(Y)
+        return Y
+
+class ResNextExtractor(nn.Module):
+    def __init__(self, dropout=0.0):
+        super(ResNextExtractor, self).__init__()
+        self.block0 = ResNeXtBlock(input_dim=3,   output_dim=128, stride=2, cardinality=32, dropout=dropout) # 128x128x3 > 64x64x64
+        self.block1 = ResNeXtBlock(input_dim=128, output_dim=128, stride=2, cardinality=32, dropout=dropout) # 64x64x64  > 32x32x128
+        self.block2 = ResNeXtBlock(input_dim=128, output_dim=128, stride=2, cardinality=32, dropout=dropout) # 32x32x128 > 16x16x128
+        self.block3 = ResNeXtBlock(input_dim=128, output_dim=128, stride=2, cardinality=32, dropout=dropout) # 16x16x128 > 8x8x128
+        self.block4 = ResNeXtBlock(input_dim=128, output_dim=128, stride=2, cardinality=32, dropout=dropout) # 8x8x128   > 4x4x128
+        
+    def forward(self, X):
+        H0 = self.block0(X)
+        H1 = self.block1(H0)
+        H2 = self.block2(H1)
+        H3 = self.block3(H2)
+        H4 = self.block4(H3)
+        return H1, H2, H3, H4
+
 #%% IMAGE ENCODER
 
 class ImageEncoder(nn.Module):
@@ -26,9 +91,8 @@ class ImageEncoder(nn.Module):
     
     def forward(self, X:torch.Tensor) -> torch.Tensor:
         n, t, d, h, w = X.size()
-        H = X.view(n*t, d, h, w)        
-        H = self.feature_extractor(H)
-        H = H[1:] # This is because Dominik's model has five outputs
+        H = X.view(n*t, d, h, w)
+        H = self.feature_extractor(H) # 32x32x128 16x16x128 8x8x128 4x4x128
         H = [layer(h) for layer, h in zip(self.downscale_layers, H)]
         #H = [h.view(n, t, -1) for h in H]
         H = [h.reshape(n, t, -1) for h in H]
@@ -52,7 +116,7 @@ class SequenceEncoder(nn.Module):
             dropout=dropout,
             batch_first=True
         )
-        self.transformer = nn.TransformerEncoder(self.transformer_layers, n_layers)
+        self.transformer = nn.TransformerEncoder(encoder_layer=self.transformer_layers, num_layers=n_layers)
         
     def positional_encoder(self) -> torch.Tensor:
         pe = torch.zeros(self.max_length, self.input_dim)
@@ -111,10 +175,12 @@ class ModelWrapper(nn.Module):
 from destruction_utilities import *
 
 # Initialises model components
-image_encoder    = ImageEncoder(feature_extractor=torch.load(f'{paths.models}/Aerial_SwinB_SI.pth'))
-sequence_encoder = dict(input_dim=512, max_length=25, n_heads=4, hidden_dim=512, n_layers=4, dropout=0.0)
-sequence_encoder = SequenceEncoder(**sequence_encoder)
-prediction_head  = PredictionHead(input_dim=512, output_dim=1)
+feature_extractor = torch.load(f'{paths.models}/Aerial_SwinB_SI.pth')
+feature_extractor = ResNextExtractor()
+image_encoder     = ImageEncoder(feature_extractor)
+sequence_encoder  = dict(input_dim=512, max_length=25, n_heads=4, hidden_dim=512, n_layers=2, dropout=0.0)
+sequence_encoder  = SequenceEncoder(**sequence_encoder)
+prediction_head   = PredictionHead(input_dim=512, output_dim=1)
 model = ModelWrapper(image_encoder, sequence_encoder, prediction_head)
 
 # Checks model parameters
