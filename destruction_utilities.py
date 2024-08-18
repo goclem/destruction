@@ -25,7 +25,7 @@ from matplotlib import pyplot
 from rasterio import enums, features, windows
 from torch import nn, utils
 from torcheval import metrics
-
+import torch.nn.functional as F
 #%% PATHS UTILITIES
 
 home  = os.path.expanduser('~')
@@ -197,8 +197,36 @@ def display_sequence(images:torch.Tensor, titles:list=None, grid_size:tuple=None
     pyplot.tight_layout()
     pyplot.show()
 
-#%% TRAINING UTILITIES
+def torch_equal_with_nan(tensor1, tensor2):
+    # Check if the shapes are the same
+    if tensor1.shape != tensor2.shape:
+        return False
+    
+    # Compare the tensors using torch.eq, which returns True for NaNs at the same positions
+    is_equal = torch.eq(tensor1, tensor2)
+    
+    # Handle NaNs by explicitly checking where both tensors have NaNs
+    nan_mask = torch.isnan(tensor1) & torch.isnan(tensor2)
+    
+    # Combine the equality check with the NaN mask
+    return torch.all(is_equal | nan_mask)
 
+def compare_dataloaders(dataloader1, dataloader2):
+    batch_count = 1
+    for batch1, batch2 in zip(dataloader1, dataloader2):
+        # Assuming the batches are tuples of (data, labels)
+        data1, labels1 = batch1
+        data2, labels2 = batch2
+            
+        # Compare the data and labels
+        if not torch.equal(data1, data2) or not torch_equal_with_nan(labels1, labels2):
+            return False
+        else:
+            return True
+            print(f"All batches are the same")
+
+#%% TRAINING UTILITIES
+"""
 class ZarrDataset(utils.data.Dataset):
     '''Zarr dataset for PyTorch'''
     def __init__(self, images_zarr:str, labels_zarr:str):
@@ -213,7 +241,34 @@ class ZarrDataset(utils.data.Dataset):
         X = torch.from_numpy(self.images[idx])
         Y = torch.from_numpy(self.labels[idx])
         return X, Y
+"""
 
+
+class ZarrDataset(utils.data.Dataset):
+    '''Zarr dataset for PyTorch'''
+    def __init__(self, images_zarr:str, labels_zarr:str, seq_len:int=None):
+        self.images = zarr.open(images_zarr, mode='r')
+        self.labels = zarr.open(labels_zarr, mode='r')
+        self.length = len(self.images)
+        self.seq_len = seq_len  # Desired sequence length (padding length)
+    
+    def __len__(self):
+        return self.length
+    
+    def pad_sequence(self, sequence:torch.Tensor, seq_len:int, value:int, dim:int=1) -> torch.Tensor:
+        pad = torch.zeros(2*len(sequence.size()), dtype=int)
+        pad = pad.index_fill(0, torch.tensor(2*dim), seq_len-sequence.size(dim)).flip(0).tolist()
+        return F.pad(sequence, pad=pad, value=value)
+    
+    def __getitem__(self, idx):
+        X = torch.from_numpy(self.images[idx])
+        Y = torch.from_numpy(self.labels[idx])
+        
+        if self.seq_len is not None:
+            X = self.pad_sequence(X, seq_len=self.seq_len, value=0, dim=0)
+            Y = self.pad_sequence(Y, seq_len=self.seq_len, value=255, dim=0)
+        
+        return X, Y
 
 
 """
@@ -258,13 +313,14 @@ class ZarrDataLoader:
 
 class ZarrDataLoader:
     '''Zarr data loader for PyTorch'''
-    def __init__(self, datasets:list, label_map:dict, batch_size:int):
+    def __init__(self, datasets:list, label_map:dict, batch_size:int, training:bool=True):
         self.datasets    = datasets
         self.batch_size  = batch_size
         self.label_map   = label_map
         self.slice_sizes = None
         self.n_batches   = None
         self.compute_slice_sizes()
+        self.training    = training
 
     def compute_slice_sizes(self):
         dataset_sizes    = torch.tensor([len(dataset) for dataset in self.datasets])
@@ -279,15 +335,27 @@ class ZarrDataLoader:
         return pad
 
     def __iter__(self):
+        
         data_loaders = [utils.data.DataLoader(dataset, batch_size=int(slice_size)) for dataset, slice_size in zip(self.datasets, self.slice_sizes) if slice_size > 0]
+
+        seq_len = 0
         for batch in zip(*data_loaders):
-            seq_len = max([data[0].size(1) for data in batch])
-            X = torch.cat([self.pad_sequence(data[0], value=0,   seq_len=seq_len, dim=1) for data in batch])
-            Y = torch.cat([self.pad_sequence(data[1], value=255, seq_len=seq_len, dim=1) for data in batch])
+            seq_len = max(seq_len,max([data[0].size(1) for data in batch]))
+            
+            
+        for batch in zip(*data_loaders):
+            #seq_len = max([data[0].size(1) for data in batch])
+            #X = torch.cat([self.pad_sequence(data[0], value=0,   seq_len=seq_len, dim=1) for data in batch])
+            #Y = torch.cat([self.pad_sequence(data[1], value=255, seq_len=seq_len, dim=1) for data in batch])
+            X = torch.cat([data[0] for data in batch])
+            Y = torch.cat([data[1] for data in batch])
             X = torch.div(X.float(), 255)
             for key, value in self.label_map.items():
                 Y = torch.where(Y == key, value, Y)
-            idx = torch.randperm(X.size(0))
+            if self.training:
+                idx = torch.randperm(X.size(0))
+            else:
+                idx = torch.arange(X.size(0))
             yield X[idx], Y[idx]
 
     def __len__(self):
@@ -312,7 +380,7 @@ class BceLoss(nn.Module):
         loss = torch.mean(loss) #? Mean weighted by number of non-missing
         return loss
 
-def shuffle_zarr(images_zarr:str, labels_zarr:str) -> None:
+def shuffle_zarr(images_zarr:str, labels_zarr:str, seq_len=None) -> None:
     '''Shuffles a Zarr array along the first axis'''
     # Reads datasets
     images = zarr.open(images_zarr, mode='r')[:]
@@ -413,10 +481,12 @@ def predict(model:nn.Module, loader, device:torch.device, n_batches:int=None) ->
         n_batches = len(loader)
     Ys, Yhs = [None]*n_batches, [None]*n_batches
     with torch.no_grad():
-        for i in range(n_batches):
-            X, Y   = next(iter(loader))
+        for i, (X, Y) in enumerate(loader):
             Ys[i]  = Y
-            Yhs[i] = model(X.to(device))
+            
+            X = X.to(device)
+            Yh = model(X)
+            Yhs[i] = Yh
             print(f'Batch {i+1:03d}/{n_batches:03d}', end='\r')
     Ys  = torch.cat(Ys)
     Yhs = torch.cat(Yhs)
