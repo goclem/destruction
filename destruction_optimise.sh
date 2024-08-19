@@ -9,5 +9,5 @@
 # python3 destruction_optimise.py --cities moschun aleppo volnovakha
 # Ther seems to be an error when including deirezzor, this has to be investigated
 # python3 destruction_optimise.py --cities hostomel irpin livoberezhnyi moschun volnovakha aleppo damascus daraa deirezzor hama homs idlib raqqa
-python3 destruction_optimise.py --cities hostomel irpin livoberezhnyi moschun volnovakha aleppo damascus daraa hama homs idlib raqqa
+python3 destruction_optimise.py --cities hostomel irpin livoberezhnyi moschun volnovakha aleppo daraa hama homs idlib raqqa
 
