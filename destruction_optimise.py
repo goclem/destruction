@@ -206,7 +206,7 @@ train(model=model,
       criterion=criterion, 
       optimiser=optimiser, 
       n_epochs=25, 
-      patience=3,
+      patience=5,
       accumulate=4,
       label='resnext_encoder')
 
