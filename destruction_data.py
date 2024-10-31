@@ -13,7 +13,6 @@ import numpy as np
 import geopandas as gpd
 import pandas as pd
 import rasterio
-import satlaspretrain_models
 import zarr
 
 from numpy import random
@@ -21,7 +20,7 @@ from destruction_utilities import *
 
 # Utilities
 params = argparse.Namespace(
-    city='moschun', 
+    city='aleppo', 
     tile_size=128, 
     train_size=0.50, valid_size=0.25, test_size=0.25,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
@@ -36,7 +35,7 @@ settlement = rasterise(source=settlement, profile=profile, update=dict(dtype='ui
 noanalysis = search_data(pattern=f'{params.city}_noanalysis.*gpkg$')[0]
 noanalysis = rasterise(source=noanalysis, profile=profile, update=dict(dtype='uint8')).astype(bool)
 analysis   = np.logical_and(settlement, np.invert(noanalysis))
-del profile, settlement, noanalysis
+del settlement, noanalysis
 
 # Splits samples
 random.seed(0)
@@ -85,7 +84,64 @@ for date in dates:
     write_raster(array=subset, profile=profile, destination=f'{paths.data}/{params.city}/labels/label_{date}.tif')
 del dates, date, subset
 
-#%% CREATES ZARR DATASETS
+#%% CREATES DATASETS FOR VITMAE
+
+#! Removes existing zarr
+reset_folder(f'{paths.data}/{params.city}/zarr', remove=True)
+
+# Files and samples
+images  = search_data(pattern(city=params.city, type='image'))
+samples = search_data(f'{params.city}_samples.tif$')
+samples = load_sequences(samples, tile_size=1).squeeze()
+
+# Writes zarr arrays
+for i, image in enumerate(images):
+    print(f'Processing period {i+1:02d}/{len(images)}')
+    # Loads data
+    arrays  = load_sequences([image], tile_size=params.tile_size).squeeze(1).numpy()
+    shape   = (0,) + arrays.shape[1:]
+    # Writes data
+    for subsample, value in dict(train=1, valid=2, test=3).items():
+        dataset = f'{paths.data}/{params.city}/zarr/images_{subsample}.zarr'
+        dataset = zarr.open(dataset, mode='a', shape=shape, dtype='u1')
+        subset  = zarr.array(arrays[samples == value], dtype='u1')
+        shape   = (dataset.shape[0] + subset.shape[0],) + dataset.shape[1:]
+        dataset.resize(dataset.shape[0]+subset.shape[0], *shape[1:])
+        dataset[dataset.shape[0]:dataset.shape[0]+subset.shape[0],...] = subset
+        del subset, shape, dataset
+    del image, arrays
+    dataset = zarr.open(dataset_path, mode='a', dtype='u1')
+
+for i, image in enumerate(images):
+    print(f'Processing period {i+1:02d}/{len(images)}')
+    
+    # Load data
+    arrays = load_sequences([image], tile_size=params.tile_size).squeeze(1).numpy()
+    
+    for subsample, value in dict(train=1, valid=2, test=3).items():
+        # Dataset path
+        dataset_path = f'{paths.data}/{params.city}/zarr/images_{subsample}.zarr'
+        
+        # Open or create dataset with initial shape if first time
+        if i == 0 and offsets[subsample] == 0:
+            shape = (0,) + arrays.shape[1:]
+            dataset = zarr.open(dataset_path, mode='a', shape=shape, dtype='u1')
+        else:
+            dataset = zarr.open(dataset_path, mode='a')
+        
+        # Filter the subset of arrays for the current subsample
+        subset = arrays[samples == value]
+        
+        # Resize the dataset along the first dimension
+        new_shape = (dataset.shape[0] + subset.shape[0],) + dataset.shape[1:]
+        dataset.resize(new_shape)
+        
+        # Append the data at the correct position
+        dataset[-subset.shape[0]:, ...] = subset
+        
+        # Cleanup
+        del subset, dataset
+#%% CREATES DATASETS FOR DESTRUCTION MODEL
 
 #! Removes existing zarr
 reset_folder(f'{paths.data}/{params.city}/zarr', remove=True)
@@ -114,7 +170,7 @@ for i, (image, label) in enumerate(zip(images, labels)):
             del label, array, shape, dataset
     del image, arrays
 
-del images, labels, samples
+del profile, images, labels, samples
 
 #%% DOWNSAMPLES NO-DESTRUCTION SEQUENCES
 
@@ -145,7 +201,11 @@ for sample in ['train', 'valid', 'test']:
 
 #%% DOWNLOADS FEATURE EXTRACTOR
 
+'''
+import satlaspretrain_models
+
 feature_extractor = satlaspretrain_models.Weights()
 feature_extractor = feature_extractor.get_pretrained_model(model_identifier='Aerial_SwinB_SI', fpn=True, device='cpu')
 torch.save(feature_extractor, f'{paths.models}/Aerial_SwinB_SI.pth')
 del feature_extractor
+'''

@@ -24,9 +24,10 @@ import zarr
 from matplotlib import pyplot
 from rasterio import enums, features, windows
 from torch import nn, utils
+from torch.nn import functional as F
 from torcheval import metrics
 
-#%% PATHS UTILITIES
+#%% PATH UTILITIES
 
 home  = os.path.expanduser('~')
 paths = argparse.Namespace(
@@ -38,7 +39,7 @@ paths = argparse.Namespace(
 )
 del home
 
-#%% FILE UTILITIES
+#%% FILE AND FOLDER UTILITIES
 
 def search_data(pattern:str='.*', directory:str=paths.data) -> list:
     '''Sorted list of files in a directory matching a regular expression'''
@@ -50,16 +51,6 @@ def search_data(pattern:str='.*', directory:str=paths.data) -> list:
     files.sort()
     return files
 
-def pattern(city:str='.*', type:str='.*', date:str='.*', ext:str='tif') -> str:
-    '''Regular expressions for search_data'''
-    regex = fr'^.*{city}/.*/{type}_{date}\.{ext}$'
-    return regex
-
-def extract(files:list, pattern:str=r'\d{4}-\d{2}-\d{2}') -> list:
-    regex = re.compile(pattern)
-    match = np.array([regex.search(file).group() for file in files])
-    return match
-
 def reset_folder(path:str, remove:bool=False) -> None:
     '''Resets a folder'''
     if remove:
@@ -69,6 +60,16 @@ def reset_folder(path:str, remove:bool=False) -> None:
     else:
         if not os.path.exists(path):
             os.mkdir(path)
+
+def pattern(city:str='.*', type:str='.*', date:str='.*', ext:str='tif') -> str:
+    '''Regular expressions for search_data'''
+    regex = fr'^.*{city}/.*/{type}_{date}\.{ext}$'
+    return regex
+
+def extract(files:list, pattern:str=r'\d{4}-\d{2}-\d{2}') -> list:
+    regex = re.compile(pattern)
+    match = np.array([regex.search(file).group() for file in files])
+    return match
 
 #%% RASTER UTILITIES
 
@@ -137,16 +138,38 @@ def tiled_profile(source:str, tile_size:int) -> dict:
 
 def image_to_tiles(image:torch.Tensor, tile_size:int, stride:int=None) -> torch.Tensor:
     '''Converts an image tensor to a tensor of tiles'''
-    depth, height, width = image.shape
+    depth, height, width = image.size()
     if stride is None: 
         stride = tile_size
-    pad_h = math.ceil((height - tile_size) / stride) * stride + tile_size - height
-    pad_w = math.ceil((width  - tile_size) / stride) * stride + tile_size - width
+    pad_h, pad_w = [math.ceil((dim - tile_size) / stride) * stride + tile_size - dim for dim in (height, width)]
     image = nn.functional.pad(image, (0, pad_w, 0, pad_h), mode='constant', value=255)
     tiles = image.unfold(1, tile_size, stride).unfold(2, tile_size, stride)
-    tiles = tiles.permute(1, 2, 0, 3, 4)
-    tiles = tiles.contiguous().view(-1, depth, tile_size, tile_size)
+    tiles = tiles.moveaxis(0, 2).contiguous()
+    tiles = tiles.view(-1, depth, tile_size, tile_size)
     return tiles
+
+def tiles_to_image(tiles:torch.Tensor, image_size:int, stride:int=None) -> torch.Tensor:
+    '''Converts a tensor of tiles to an image tensor'''
+    depth, height, width = image_size
+    tile_size = tiles.size(-1)
+    if stride is None: 
+        stride = tile_size
+    pad_h, pad_w  = [math.ceil((dim - tile_size) / stride) * stride + tile_size - dim for dim in (height, width)]
+    height, width = height + pad_h, width + pad_w
+    # Tiles to image
+    tiles = tiles.view(-1, depth * tile_size * tile_size)
+    tiles = tiles.t().unsqueeze(0)
+    image = F.fold(tiles, output_size=(height, width), kernel_size=tile_size, stride=stride)
+    # Normalisation
+    norm  = torch.ones_like(image)
+    norm  = norm.unfold(2, tile_size, stride).unfold(3, tile_size, stride)
+    norm  = norm.permute(0, 1, 4, 5, 2, 3).contiguous()
+    norm  = norm.view(1, depth * tile_size * tile_size, -1)
+    norm  = F.fold(norm, output_size=(height, width), kernel_size=tile_size, stride=stride)
+    image = (image / norm).squeeze(0)
+    # Removes padding
+    image = image[:, :-pad_h if pad_h > 0 else None, :-pad_w if pad_w > 0 else None]
+    return image
 
 def load_sequences(files:list, tile_size:int, window:int=None, stride:int=None) -> torch.Tensor:
     '''Loads a sequence of rasters as a tensor of tiles'''
@@ -157,11 +180,6 @@ def load_sequences(files:list, tile_size:int, window:int=None, stride:int=None) 
     sequences = [image_to_tiles(image, tile_size=tile_size, stride=stride) for image in sequences]
     sequences = torch.stack(sequences).swapaxes(1, 0)
     return sequences
-
-def sample_split(images:np.ndarray, samples:np.ndarray) -> list:
-    '''Splits the data structure into multiple samples'''
-    samples = [images[samples == value, ...] for value in np.unique(samples)]
-    return samples
 
 #%% DISPLAY UTILITIES
     
@@ -196,7 +214,7 @@ def display_sequence(images:torch.Tensor, titles:list=None, grid_size:tuple=None
     pyplot.tight_layout()
     pyplot.show()
 
-#%% TRAINING UTILITIES
+#%% DATASET UTILITIES
 
 class ZarrDataset(utils.data.Dataset):
     '''Zarr dataset for PyTorch'''
@@ -249,25 +267,6 @@ class ZarrDataLoader:
 
     def __len__(self):
         return self.n_batches
-    
-class BceLoss(nn.Module):
-    '''Binary cross-entropy loss with optional focal loss'''
-    def __init__(self, focal:bool=True, drop_nan:bool=True, alpha:float=0.25, gamma:float=2.0):
-        super().__init__()
-        self.focal    = focal
-        self.drop_nan = drop_nan
-        self.alpha    = alpha
-        self.gamma    = gamma
-
-    def forward(self, inputs:torch.Tensor, targets:torch.Tensor) -> torch.Tensor:
-        subset = torch.ones(targets.size(), dtype=torch.bool)
-        if self.drop_nan:
-            subset = ~torch.isnan(targets)
-        loss = nn.functional.binary_cross_entropy(inputs[subset], targets[subset], reduction='none')
-        if self.focal:
-            loss = self.alpha * (1 - torch.exp(-loss))**self.gamma * loss
-        loss = torch.mean(loss) #? Mean weighted by number of non-missing
-        return loss
 
 def shuffle_zarr(images_zarr:str, labels_zarr:str) -> None:
     '''Shuffles a Zarr array along the first axis'''
@@ -284,6 +283,8 @@ def shuffle_zarr(images_zarr:str, labels_zarr:str) -> None:
     dataset[:] = images
     dataset = zarr.open(labels_zarr, shape=labels.shape, dtype=labels.dtype, mode='w')
     dataset[:] = labels
+
+#%% MODEL TRAINING UTILITIES
 
 def count_parameters(model:nn.Module) -> None:
     '''Counts the number of parameters in a model'''
@@ -306,11 +307,6 @@ def empty_cache(device:torch.device) -> None:
         torch.cuda.empty_cache()
     if device == 'mps':
         torch.mps.empty_cache()
-
-def print_statistics(batch:int, n_batches:int, run_loss:torch.Tensor, n_obs:int, n_correct:int, run_time:float, label:str) -> None:
-    '''Prints the current statistics of a batch'''
-    end_print = '\r' if batch+1 < n_batches else '\n'
-    print(f'{label: <10} | Batch {batch+1:03d}/{n_batches:03d} | Loss {run_loss / n_obs:.4f} | Accuracy {n_correct / n_obs:.4f} | Runtime {run_time/(batch+1):2.2f}s', end=end_print)
 
 def optimise(model:nn.Module, loader, device:torch.device, criterion, optimiser, accumulate:int=1) -> torch.Tensor:
     '''Optimises a model using a training sample for one epoch'''
@@ -378,5 +374,24 @@ def predict(model:nn.Module, loader, device:torch.device, n_batches:int=None) ->
     Ys  = torch.cat(Ys)
     Yhs = torch.cat(Yhs)
     return Ys, Yhs
+
+class BceLoss(nn.Module):
+    '''Binary cross-entropy loss with optional focal loss'''
+    def __init__(self, focal:bool=True, drop_nan:bool=True, alpha:float=0.25, gamma:float=2.0):
+        super().__init__()
+        self.focal    = focal
+        self.drop_nan = drop_nan
+        self.alpha    = alpha
+        self.gamma    = gamma
+
+    def forward(self, inputs:torch.Tensor, targets:torch.Tensor) -> torch.Tensor:
+        subset = torch.ones(targets.size(), dtype=torch.bool)
+        if self.drop_nan:
+            subset = ~torch.isnan(targets)
+        loss = nn.functional.binary_cross_entropy(inputs[subset], targets[subset], reduction='none')
+        if self.focal:
+            loss = self.alpha * (1 - torch.exp(-loss))**self.gamma * loss
+        loss = torch.mean(loss) #? Mean weighted by number of non-missing
+        return loss
 
 #%%
