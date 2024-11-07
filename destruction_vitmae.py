@@ -23,6 +23,7 @@ from torchvision import transforms
 
 # Utilities
 device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+
 params = argparse.Namespace(
     tile_size=224, 
     batch_size_image=64,
@@ -36,14 +37,14 @@ params = argparse.Namespace(
 #%% INITIALISES DATA LOADERS
 
 # Datasets
-train_datasets = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_train.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_train.zarr') for city in params.cities]))
-valid_datasets = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_valid.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_valid.zarr') for city in params.cities]))
-test_datasets  = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_test.zarr',  labels_zarr=f'{paths.data}/{city}/zarr/labels_test.zarr')  for city in params.cities]))
+train_datasets = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_train.zarr') for city in params.cities]))
+valid_datasets = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_valid.zarr') for city in params.cities]))
+test_datasets  = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_test.zarr')  for city in params.cities]))
 
 # Intialises data loaders
-train_loader = [ZarrDataset(**train_datasets[city]) for city in params.cities]
-valid_loader = [ZarrDataset(**valid_datasets[city]) for city in params.cities]
-test_loader  = [ZarrDataset(**test_datasets[city])  for city in params.cities]
+train_loader = [ZarrDatasetX(**train_datasets[city]) for city in params.cities]
+valid_loader = [ZarrDatasetX(**valid_datasets[city]) for city in params.cities]
+test_loader  = [ZarrDatasetX(**test_datasets[city])  for city in params.cities]
 train_loader = ZarrDataLoader(train_loader, batch_size=params.batch_size, label_map=params.label_map)
 valid_loader = ZarrDataLoader(valid_loader, batch_size=params.batch_size, label_map=params.label_map)
 test_loader  = ZarrDataLoader(test_loader,  batch_size=params.batch_size, label_map=params.label_map)
@@ -53,6 +54,44 @@ X, _ = next(iter(train_loader))
 X    = X.view()
 del X, _
 ''' 
+
+batch_size  = 64
+datasets    = dict(aleppo=20, raqqa=50, homs=100)
+slice_sizes = np.array([np.log(dataset) for dataset in datasets.values()])
+slice_sizes = np.divide(slice_sizes, slice_sizes.sum())
+slice_sizes = np.random.choice(list(datasets.keys()), batch_size, p=slice_sizes)
+slice_sizes = np.unique(slice_sizes, return_counts=True)
+é = dict(zip(slice_sizes[0], slice_sizes[1]))
+
+class ZarrDataLoaderX:
+    '''Zarr data loader for PyTorch'''
+    def __init__(self, datasets:list, batch_size:int):
+        self.datasets    = datasets
+        self.batch_size  = batch_size
+        self.slice_sizes = None
+
+    def compute_slice_sizes(self):
+        slice_sizes = np.array([np.log(len(dataset)) for dataset in self.datasets])
+        slice_sizes = np.divide(slice_sizes, slice_sizes.sum())
+        slice_sizes = np.random.choice(datasets.keys(), self.batch_size, p=slice_sizes)
+        slice_sizes = np.unique(slice_sizes, return_counts=True)
+        self.slice_sizes = dict(zip(dataset_slices[0], dataset_slices[1]))
+
+    def __iter__(self):
+        data_loaders = [utils.data.DataLoader(dataset, batch_size=int(slice_size)) for dataset, slice_size in zip(self.datasets, self.slice_sizes) if slice_size > 0]
+        for batch in zip(*data_loaders):
+            seq_len = max([data[0].size(1) for data in batch])
+            X = torch.cat([self.pad_sequence(data[0], value=0,   seq_len=seq_len, dim=1) for data in batch])
+            Y = torch.cat([self.pad_sequence(data[1], value=255, seq_len=seq_len, dim=1) for data in batch])
+            X = torch.div(X.float(), 255)
+            for key, value in self.label_map.items():
+                Y = torch.where(Y == key, value, Y)
+            idx = torch.randperm(X.size(0))
+            yield X[idx], Y[idx]
+
+    def __len__(self):
+        return self.n_batches
+
 
 #%% FINE-TUNING
 

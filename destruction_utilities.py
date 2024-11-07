@@ -216,7 +216,20 @@ def display_sequence(images:torch.Tensor, titles:list=None, grid_size:tuple=None
 
 #%% DATASET UTILITIES
 
-class ZarrDataset(utils.data.Dataset):
+class ZarrDatasetX(utils.data.Dataset):
+    '''Zarr dataset for PyTorch'''
+    def __init__(self, images_zarr:str):
+        self.images = zarr.open(images_zarr, mode='r')
+        self.length = len(self.images)
+    
+    def __len__(self):
+        return self.length
+    
+    def __getitem__(self, idx):
+        X = torch.from_numpy(self.images[idx])
+        return X
+
+class ZarrDatasetXY(utils.data.Dataset):
     '''Zarr dataset for PyTorch'''
     def __init__(self, images_zarr:str, labels_zarr:str):
         self.images = zarr.open(images_zarr, mode='r')
@@ -231,7 +244,7 @@ class ZarrDataset(utils.data.Dataset):
         Y = torch.from_numpy(self.labels[idx])
         return X, Y
 
-class ZarrDataLoader:
+class ZarrDataLoaderXY:
     '''Zarr data loader for PyTorch'''
     def __init__(self, datasets:list, label_map:dict, batch_size:int):
         self.datasets    = datasets

@@ -97,50 +97,17 @@ samples = load_sequences(samples, tile_size=1).squeeze()
 # Writes zarr arrays
 for i, image in enumerate(images):
     print(f'Processing period {i+1:02d}/{len(images)}')
-    # Loads data
-    arrays  = load_sequences([image], tile_size=params.tile_size).squeeze(1).numpy()
-    shape   = (0,) + arrays.shape[1:]
-    # Writes data
-    for subsample, value in dict(train=1, valid=2, test=3).items():
-        dataset = f'{paths.data}/{params.city}/zarr/images_{subsample}.zarr'
+    arrays   = load_sequences([image], tile_size=params.tile_size).squeeze(1).numpy()
+    counters = dict(train=0, valid=0, test=0)
+    for sample, value in dict(train=1, valid=2, test=3).items():
+        array   = zarr.array(arrays[samples == value], dtype='u1')
+        shape   = (array.shape[0] * len(images), *array.shape[1:])
+        dataset = f'{paths.data}/{params.city}/zarr/images_{sample}.zarr'
         dataset = zarr.open(dataset, mode='a', shape=shape, dtype='u1')
-        subset  = zarr.array(arrays[samples == value], dtype='u1')
-        shape   = (dataset.shape[0] + subset.shape[0],) + dataset.shape[1:]
-        dataset.resize(dataset.shape[0]+subset.shape[0], *shape[1:])
-        dataset[dataset.shape[0]:dataset.shape[0]+subset.shape[0],...] = subset
-        del subset, shape, dataset
-    del image, arrays
-    dataset = zarr.open(dataset_path, mode='a', dtype='u1')
+        dataset[counters[sample]:counters[sample]+array.shape[0],:] = array
+        counters[sample] += array.shape[0]
+        del array, shape, dataset
 
-for i, image in enumerate(images):
-    print(f'Processing period {i+1:02d}/{len(images)}')
-    
-    # Load data
-    arrays = load_sequences([image], tile_size=params.tile_size).squeeze(1).numpy()
-    
-    for subsample, value in dict(train=1, valid=2, test=3).items():
-        # Dataset path
-        dataset_path = f'{paths.data}/{params.city}/zarr/images_{subsample}.zarr'
-        
-        # Open or create dataset with initial shape if first time
-        if i == 0 and offsets[subsample] == 0:
-            shape = (0,) + arrays.shape[1:]
-            dataset = zarr.open(dataset_path, mode='a', shape=shape, dtype='u1')
-        else:
-            dataset = zarr.open(dataset_path, mode='a')
-        
-        # Filter the subset of arrays for the current subsample
-        subset = arrays[samples == value]
-        
-        # Resize the dataset along the first dimension
-        new_shape = (dataset.shape[0] + subset.shape[0],) + dataset.shape[1:]
-        dataset.resize(new_shape)
-        
-        # Append the data at the correct position
-        dataset[-subset.shape[0]:, ...] = subset
-        
-        # Cleanup
-        del subset, dataset
 #%% CREATES DATASETS FOR DESTRUCTION MODEL
 
 #! Removes existing zarr
@@ -160,11 +127,11 @@ for i, (image, label) in enumerate(zip(images, labels)):
         images=load_sequences([image], tile_size=params.tile_size).squeeze(1).numpy(),
         labels=load_sequences([label], tile_size=1).squeeze(2, 3, 4).numpy())
     # Writes data for each sample
-    for subsample, value in dict(train=1, valid=2, test=3).items():
+    for sample, value in dict(train=1, valid=2, test=3).items():
         for label, array in arrays.items():
             array   = zarr.array(array[samples == value], dtype='u1')
             shape   = (array.shape[0], len(images), *array.shape[1:])
-            dataset = f'{paths.data}/{params.city}/zarr/{label}_{subsample}.zarr'
+            dataset = f'{paths.data}/{params.city}/zarr/{label}_{sample}.zarr'
             dataset = zarr.open(dataset, mode='a', shape=shape, dtype='u1')
             dataset[:,i] = array
             del label, array, shape, dataset
