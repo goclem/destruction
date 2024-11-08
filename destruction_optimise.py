@@ -35,12 +35,12 @@ valid_datasets = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}
 test_datasets  = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_test.zarr',  labels_zarr=f'{paths.data}/{city}/zarr/labels_test.zarr')  for city in params.cities]))
 
 # Intialises data loaders
-train_loader = [ZarrDataset(**train_datasets[city]) for city in params.cities]
-valid_loader = [ZarrDataset(**valid_datasets[city]) for city in params.cities]
-test_loader  = [ZarrDataset(**test_datasets[city])  for city in params.cities]
-train_loader = ZarrDataLoader(train_loader, batch_size=params.batch_size, label_map=params.label_map)
-valid_loader = ZarrDataLoader(valid_loader, batch_size=params.batch_size, label_map=params.label_map)
-test_loader  = ZarrDataLoader(test_loader,  batch_size=params.batch_size, label_map=params.label_map)
+train_loader = [ZarrDatasetXY(**train_datasets[city]) for city in params.cities]
+valid_loader = [ZarrDatasetXY(**valid_datasets[city]) for city in params.cities]
+test_loader  = [ZarrDatasetXY(**test_datasets[city])  for city in params.cities]
+train_loader = ZarrDataLoaderXY(train_loader, batch_size=params.batch_size, label_map=params.label_map)
+valid_loader = ZarrDataLoaderXY(valid_loader, batch_size=params.batch_size, label_map=params.label_map)
+test_loader  = ZarrDataLoaderXY(test_loader,  batch_size=params.batch_size, label_map=params.label_map)
 
 ''' Checks data loaders
 X, Y = next(iter(train_loader))

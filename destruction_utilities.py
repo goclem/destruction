@@ -216,19 +216,6 @@ def display_sequence(images:torch.Tensor, titles:list=None, grid_size:tuple=None
 
 #%% DATASET UTILITIES
 
-class ZarrDatasetX(utils.data.Dataset):
-    '''Zarr dataset for PyTorch'''
-    def __init__(self, images_zarr:str):
-        self.images = zarr.open(images_zarr, mode='r')
-        self.length = len(self.images)
-    
-    def __len__(self):
-        return self.length
-    
-    def __getitem__(self, idx):
-        X = torch.from_numpy(self.images[idx])
-        return X
-
 class ZarrDatasetXY(utils.data.Dataset):
     '''Zarr dataset for PyTorch'''
     def __init__(self, images_zarr:str, labels_zarr:str):
@@ -281,21 +268,21 @@ class ZarrDataLoaderXY:
     def __len__(self):
         return self.n_batches
 
-def shuffle_zarr(images_zarr:str, labels_zarr:str) -> None:
+def shuffle_zarr(images_zarr:str, labels_zarr:str=None) -> None:
     '''Shuffles a Zarr array along the first axis'''
-    # Reads datasets
-    images = zarr.open(images_zarr, mode='r')[:]
-    labels = zarr.open(labels_zarr, mode='r')[:]
-    # Shfulle indices
+    # Images
+    images  = zarr.open(images_zarr, mode='r')[:]
     indices = np.arange(len(images))
     np.random.shuffle(indices)
-    images = images[indices]
-    labels = labels[indices]
-    # Writes datasets
+    images  = images[indices]
     dataset = zarr.open(images_zarr, shape=images.shape, dtype=images.dtype, mode='w')
     dataset[:] = images
-    dataset = zarr.open(labels_zarr, shape=labels.shape, dtype=labels.dtype, mode='w')
-    dataset[:] = labels
+    # Labels
+    if labels_zarr is not None:
+        labels  = zarr.open(labels_zarr, mode='r')[:]
+        labels  = labels[indices]
+        dataset = zarr.open(labels_zarr, shape=labels.shape, dtype=labels.dtype, mode='w')
+        dataset[:] = labels
 
 #%% MODEL TRAINING UTILITIES
 

@@ -20,7 +20,7 @@ from destruction_utilities import *
 
 # Utilities
 params = argparse.Namespace(
-    city='aleppo', 
+    city='moschun', 
     tile_size=128, 
     train_size=0.50, valid_size=0.25, test_size=0.25,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
@@ -107,6 +107,11 @@ for i, image in enumerate(images):
         dataset[counters[sample]:counters[sample]+array.shape[0],:] = array
         counters[sample] += array.shape[0]
         del array, shape, dataset
+
+# Shuffles Zarr arrays
+shuffle_zarr(f'{paths.data}/aleppo/zarr/images_train.zarr')
+shuffle_zarr(f'{paths.data}/aleppo/zarr/images_valid.zarr')
+shuffle_zarr(f'{paths.data}/aleppo/zarr/images_test.zarr')
 
 #%% CREATES DATASETS FOR DESTRUCTION MODEL
 
