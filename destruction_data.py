@@ -84,35 +84,6 @@ for date in dates:
     write_raster(array=subset, profile=profile, destination=f'{paths.data}/{params.city}/labels/label_{date}.tif')
 del dates, date, subset
 
-#%% CREATES DATASETS FOR VITMAE
-
-#! Removes existing zarr
-reset_folder(f'{paths.data}/{params.city}/zarr', remove=True)
-
-# Files and samples
-images  = search_data(pattern(city=params.city, type='image'))
-samples = search_data(f'{params.city}_samples.tif$')
-samples = load_sequences(samples, tile_size=1).squeeze()
-
-# Writes zarr arrays
-for i, image in enumerate(images):
-    print(f'Processing period {i+1:02d}/{len(images)}')
-    arrays   = load_sequences([image], tile_size=params.tile_size).squeeze(1).numpy()
-    counters = dict(train=0, valid=0, test=0)
-    for sample, value in dict(train=1, valid=2, test=3).items():
-        array   = zarr.array(arrays[samples == value], dtype='u1')
-        shape   = (array.shape[0] * len(images), *array.shape[1:])
-        dataset = f'{paths.data}/{params.city}/zarr/images_{sample}.zarr'
-        dataset = zarr.open(dataset, mode='a', shape=shape, dtype='u1')
-        dataset[counters[sample]:counters[sample]+array.shape[0],:] = array
-        counters[sample] += array.shape[0]
-        del array, shape, dataset
-
-# Shuffles Zarr arrays
-shuffle_zarr(f'{paths.data}/aleppo/zarr/images_train.zarr')
-shuffle_zarr(f'{paths.data}/aleppo/zarr/images_valid.zarr')
-shuffle_zarr(f'{paths.data}/aleppo/zarr/images_test.zarr')
-
 #%% CREATES DATASETS FOR DESTRUCTION MODEL
 
 #! Removes existing zarr
@@ -139,15 +110,13 @@ for i, (image, label) in enumerate(zip(images, labels)):
             dataset = f'{paths.data}/{params.city}/zarr/{label}_{sample}.zarr'
             dataset = zarr.open(dataset, mode='a', shape=shape, dtype='u1')
             dataset[:,i] = array
-            del label, array, shape, dataset
-    del image, arrays
 
-del profile, images, labels, samples
+del images, labels, samples, i, image, label, arrays, sample, value, array, shape, dataset
 
 #%% DOWNSAMPLES NO-DESTRUCTION SEQUENCES
 
 for sample in ['train', 'valid', 'test']:
-    print(f'Processing {sample} sample')
+    print(f'Processing sample {sample}')
     # Define paths
     images_zarr = f'{paths.data}/{params.city}/zarr/images_{sample}.zarr'
     labels_zarr = f'{paths.data}/{params.city}/zarr/labels_{sample}.zarr'
@@ -169,7 +138,22 @@ for sample in ['train', 'valid', 'test']:
     dataset[:] = labels
     # Shuffles datasets
     shuffle_zarr(images_zarr, labels_zarr)
-    del images_zarr, labels_zarr, images, labels, destroy, indices, dataset
+
+del sample, images_zarr, labels_zarr, images, labels, destroy, indices, dataset
+
+#%% RESHAPES ZARR DATASETS FOR THE VITMAE MODEL
+
+for sample in ['train', 'valid', 'test']:
+    print(f'Processing sample {sample}')
+    src_dataset   = f'{paths.data}/{params.city}/zarr/images_{sample}.zarr'
+    src_dataset   = zarr.open(src_dataset, mode='r')
+    n, T, c, h, w = src_dataset.shape
+    dst_dataset   = f'{paths.data}/{params.city}/zarr/images_{sample}_vitmae.zarr'
+    dst_dataset   = zarr.open(dst_dataset, mode='w', shape=(n * T, c, h, w), dtype=src_dataset.dtype)
+    for t in range(T):
+        dst_dataset[t*n:(t+1)*n,:] = src_dataset[:,t,:]
+
+del sample, src_dataset, dst_dataset, n, T, c, h, w, t
 
 #%% DOWNLOADS FEATURE EXTRACTOR
 

@@ -11,26 +11,23 @@
 # Packages
 import accelerate
 import argparse
+import matplotlib.pyplot as plt
 import numpy as np
 import transformers
 import torch
 
 from destruction_utilities import *
-from matplotlib import colors, pyplot
 
 # Utilities
 device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
-params = argparse.Namespace(
-    tile_size=224,
-    batch_size=32,
-    cities=['aleppo', 'moschun'])
+params = argparse.Namespace(batch_size=64, cities=['aleppo', 'moschun'])
 
-#%% UTILITIES
+#%% TRAINING UTILITIES
 
-class ZarrDatasetX(utils.data.Dataset):
-    '''Zarr dataset for PyTorch'''
-    def __init__(self, images_zarr:str):
-        self.images = zarr.open(images_zarr, mode='r')
+class ZarrDataset(utils.data.Dataset):
+
+    def __init__(self, dataset:str):
+        self.images = zarr.open(dataset, mode='r')
         self.length = len(self.images)
     
     def __len__(self):
@@ -40,71 +37,80 @@ class ZarrDatasetX(utils.data.Dataset):
         X = torch.from_numpy(self.images[idx])
         return X
 
-class ZarrDataLoaderX:
-    '''Zarr data loader for PyTorch'''
-    def __init__(self, datasets:list, batch_size:int, preprocessor:callable=None):
+class ZarrDataLoader:
+
+    def __init__(self, datafiles:list, datasets:list, batch_size:int, preprocessor=None):
+        self.datafiles    = datafiles
         self.datasets     = datasets
         self.batch_size   = batch_size
-        self.indices      = np.zeros(len(datasets), dtype=int)
-        self.data_sizes   = np.array([len(dataset) for dataset in datasets]) 
+        self.batch_index  = 0
+        self.data_sizes   = np.array([len(dataset) for dataset in datasets])
+        self.data_indices = self.compute_data_indices()
         self.preprocessor = preprocessor
 
-    def compute_slice_sizes(self):
-        slice_sizes = np.array([np.log(len(dataset)) for dataset in self.datasets])
-        slice_sizes = np.divide(slice_sizes, slice_sizes.sum())
-        slice_sizes = np.random.multinomial(self.batch_size, slice_sizes)
-        return slice_sizes
+    def compute_data_indices(self):
+        slice_sizes  = np.cbrt(self.data_sizes) #! Large impact
+        slice_sizes  = np.divide(slice_sizes, slice_sizes.sum())
+        slice_sizes  = np.random.multinomial(self.batch_size, slice_sizes, size=int(np.max(self.data_sizes / self.batch_size)))
+        data_indices = np.row_stack((np.zeros(len(self.data_sizes), dtype=int), np.cumsum(slice_sizes, axis=0)))
+        data_indices = data_indices[np.all(data_indices < self.data_sizes, axis=1)]
+        return data_indices
 
+    def __len__(self):
+        return len(self.data_indices) - 1
+    
     def __iter__(self):
-        while True:
-            slice_sizes = self.compute_slice_sizes()
-            if np.any(self.indices + slice_sizes > self.data_sizes):
-                break
-            X = torch.cat([dataset[indice:indice+slice_size] for dataset, indice, slice_size in zip(self.datasets, self.indices, slice_sizes) if slice_size > 0])
-            X = X.moveaxis(1, -1)
-            X = self.preprocessor(X, return_tensors='pt').pixel_values
-            X = {'pixel_values':X}
-            self.indices += slice_sizes
-            yield X
+        self.batch_index = 0
+        for datafile in self.datafiles:
+            print(f'Shuffling {datafile}')
+            shuffle_zarr(datafile)
+        return self
 
-# Custom Trainer to use PyTorch DataLoader
-class CustomTrainer(transformers.Trainer):
+    def __next__(self):
+        if self.batch_index == len(self):
+            raise StopIteration 
+        X = list()
+        for dataset, indices in zip(self.datasets, self.data_indices.T):
+            start = indices[self.batch_index]
+            end   = indices[self.batch_index + 1]
+            X.append(dataset[start:end])
+        X = torch.cat(X)
+        if self.preprocessor is not None:
+            X = self.preprocessor(X.moveaxis(1, -1), return_tensors='pt', do_resize=True)
+        self.batch_index += 1 
+        return X
+
+class ZarrTrainer(transformers.Trainer):
+
     def __init__(self, *args, train_dataloader, eval_dataloader, **kwargs):
         super().__init__(*args, **kwargs)
         self._train_dataloader = train_dataloader
-        self._eval_dataloader = eval_dataloader
+        self._eval_dataloader  = eval_dataloader
 
     def get_train_dataloader(self):
         return self._train_dataloader
     
     def get_eval_dataloader(self, eval_dataset=None):
         return self._eval_dataloader
-    
-def unprocess_images(images:torch.Tensor, preprocessor) -> torch.Tensor:
-    std    = torch.tensor(preprocessor.image_std).view(1, 3, 1, 1)
-    mean   = torch.tensor(preprocessor.image_mean).view(1, 3, 1, 1)
-    images = torch.clip((images * std + mean) * 255, 0, 255).to(torch.uint8)
-    return images
 
 #%% INITIALISES DATA LOADERS
 
 # Initialises datasets
-train_datasets = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_train.zarr') for city in params.cities]))
-valid_datasets = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_valid.zarr') for city in params.cities]))
-test_datasets  = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_test.zarr')  for city in params.cities]))
-
-train_datasets = [ZarrDatasetX(**train_datasets[city]) for city in params.cities]
-valid_datasets = [ZarrDatasetX(**valid_datasets[city]) for city in params.cities]
-test_datasets  = [ZarrDatasetX(**test_datasets[city])  for city in params.cities]
+train_datafiles = [f'{paths.data}/{city}/zarr/images_train_vitmae.zarr' for city in params.cities]
+valid_datafiles = [f'{paths.data}/{city}/zarr/images_valid_vitmae.zarr' for city in params.cities]
+test_datafiles  = [f'{paths.data}/{city}/zarr/images_test_vitmae.zarr'  for city in params.cities]
+train_datasets  = [ZarrDataset(datafile) for datafile in train_datafiles]
+valid_datasets  = [ZarrDataset(datafile) for datafile in valid_datafiles]
+test_datasets   = [ZarrDataset(datafile) for datafile in test_datafiles]
 
 # Intialises data loaders
 preprocessor = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
-train_loader = ZarrDataLoaderX(train_datasets, batch_size=params.batch_size, preprocessor=preprocessor)
-valid_loader = ZarrDataLoaderX(valid_datasets, batch_size=params.batch_size, preprocessor=preprocessor)
-test_loader  = ZarrDataLoaderX(test_datasets,  batch_size=params.batch_size, preprocessor=preprocessor)
+train_loader = ZarrDataLoader(datafiles=train_datafiles, datasets=train_datasets, batch_size=params.batch_size, preprocessor=preprocessor)
+valid_loader = ZarrDataLoader(datafiles=valid_datafiles, datasets=valid_datasets, batch_size=params.batch_size, preprocessor=preprocessor)
+test_loader  = ZarrDataLoader(datafiles=test_datafiles,  datasets=test_datasets,  batch_size=params.batch_size, preprocessor=None)
 
-# next(iter(train_loader)) # Checks data loader
-del train_datasets, valid_datasets, test_datasets
+# X = next(test_loader) # Checks data loader
+del train_datafiles, valid_datafiles, test_datafiles, train_datasets, valid_datasets, test_datasets
 
 #%% FINE-TUNES MODEL
 
@@ -113,48 +119,65 @@ model = transformers.ViTMAEForPreTraining.from_pretrained('facebook/vit-mae-base
 model = model.to(device)
 
 training_args = transformers.TrainingArguments(
-    output_dir='../results',
-    num_train_epochs=5,
+    output_dir='../models',
+    num_train_epochs=100,
     per_device_train_batch_size=params.batch_size,
     per_device_eval_batch_size=params.batch_size,
-    warmup_steps=500,
-    max_steps=10000, #! Required
+    learning_rate=1e-4,
     weight_decay=0.01,
-    logging_dir='../logs',
-    logging_steps=100,
-    evaluation_strategy='epoch',
+    lr_scheduler_type='linear',
+    warmup_steps=100,
+    save_strategy='epoch',
+    eval_strategy='epoch',
+    load_best_model_at_end=True,
+    metric_for_best_model='eval_runtime',
+    logging_strategy='no'
 )
 
-trainer = CustomTrainer(
+trainer = ZarrTrainer(
     model=model,
     args=training_args,
     train_dataloader=train_loader,
     eval_dataloader=valid_loader
 )
 
-trainer.train()
+history = trainer.train()
+# model.save_pretrained(f'{paths.models}/mae')
+# del model, training_args, trainer
 
-model.save_pretrained(f'{paths.models}/mae')
-del model, training_args, trainer
+#%% CHECKS RECONSTRUCTIONS
 
-#%% CHECKS PREDICTIONS
+def unprocess_images(images:torch.Tensor, preprocessor:nn.Module) -> torch.Tensor:
+    means  = torch.Tensor(preprocessor.image_mean).view(3, 1, 1)
+    stds   = torch.Tensor(preprocessor.image_std).view(3, 1, 1)
+    images = (images * stds + means) * 255
+    images = torch.clip(images, 0, 255).to(torch.uint8)
+    return images
 
+# Predicts images
+images = next(iter(train_loader)).pixel_values
+with torch.no_grad():
+    outputs = model(images.to(device))
 
+# Unprocesses outputs
+masks = outputs.mask.cpu().unsqueeze(-1).repeat(1, 1, model.config.patch_size**2 * 3)
+masks = model.unpatchify(masks).int()
+preds = model.unpatchify(outputs.logits.cpu())
 
-''' Checks data
-display(unprocess_images(X_train[0], preprocessor)[0], title=Y_train[0].item())
+images  = unprocess_images(images, preprocessor)
+inputs  = images * (1 - masks)
+preds   = unprocess_images(preds, preprocessor) * masks
+outputs = inputs + preds
+figdata = torch.stack([images, inputs, preds, outputs], dim=1)
+del images, outputs, masks, preds, inputs
 
-image=io.read_image('/Users/goclem/Downloads/morrisseau_close1.jpg')
-display(image, title='Original image')
-
-image = unprocess_images(X_train[0], preprocessor)[0]
-image = image.permute(1, 2, 0)
-
-%matplotlib widget
-fig, ax = pyplot.subplots(1, figsize=(10, 10))
-ax.imshow(image, cmap='gray')
-pyplot.show()
-
-''' 
+# Plots images, inputs, predictions and outputs
+for i in range(5):
+    fig, axs = plt.subplots(1, 4, figsize=(20, 5))
+    for ax, image, title in zip(axs.ravel(), figdata[i], ['Image', 'Input', 'Prediction', 'Output']):
+        ax.imshow(image.moveaxis(0, -1))
+        ax.set_title(title, fontsize=15)
+        ax.set_axis_off()
+    plt.show()
 
 #%%
