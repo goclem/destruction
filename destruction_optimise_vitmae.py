@@ -112,7 +112,7 @@ test_loader  = ZarrDataLoader(datafiles=test_datafiles,  datasets=test_datasets,
 # X = next(test_loader) # Checks data loader
 del train_datafiles, valid_datafiles, test_datafiles, train_datasets, valid_datasets, test_datasets
 
-#%% FINE-TUNES MODEL
+#%% FINE-TUNES VITMAE
 
 # Loads pre-trained model
 model = transformers.ViTMAEForPreTraining.from_pretrained('facebook/vit-mae-base')

@@ -27,32 +27,107 @@ params = argparse.Namespace(
     batch_size=8,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
 
+#%% TRAINING UTILITIES
+
+class ZarrDataset(utils.data.Dataset):
+
+    def __init__(self, images_zarr:str, labels_zarr:str):
+        self.images = zarr.open(images_zarr, mode='r')
+        self.labels = zarr.open(labels_zarr, mode='r')
+        self.length = len(self.images)
+    
+    def __len__(self):
+        return self.length
+    
+    def __getitem__(self, idx):
+        X = torch.from_numpy(self.images[idx])
+        Y = torch.from_numpy(self.labels[idx])
+        return X, Y
+
+class ZarrDataLoader:
+
+    def __init__(self, datasets:list, label_map:dict, batch_size:int):
+        self.datasets    = datasets
+        self.batch_size  = batch_size
+        self.label_map   = label_map
+        self.slice_sizes = None
+        self.n_batches   = None
+        self.compute_slice_sizes()
+
+    def compute_slice_sizes(self):
+        dataset_sizes    = torch.tensor([len(dataset) for dataset in self.datasets])
+        self.slice_sizes = (torch.div(dataset_sizes, dataset_sizes.sum()) * self.batch_size).round().int()
+        self.n_batches   = np.divide(dataset_sizes, self.slice_sizes, where=self.slice_sizes > 0).floor().int()
+        self.n_batches   = self.n_batches[self.n_batches > 0].min()
+    
+    def pad_sequence(self, sequence:torch.Tensor, value:int, seq_len:int=None, dim:int=1) -> torch.Tensor:
+        pad = torch.zeros(2*len(sequence.size()), dtype=int)
+        pad = pad.index_fill(0, torch.tensor(2*dim), seq_len-sequence.size(dim)).flip(0).tolist()
+        pad = nn.functional.pad(sequence, pad=pad, value=value)
+        return pad
+
+    def __iter__(self):
+        data_loaders = [utils.data.DataLoader(dataset, batch_size=int(slice_size)) for dataset, slice_size in zip(self.datasets, self.slice_sizes) if slice_size > 0]
+        for batch in zip(*data_loaders):
+            seq_len = max([data[0].size(1) for data in batch])
+            X = torch.cat([self.pad_sequence(data[0], value=0,   seq_len=seq_len, dim=1) for data in batch])
+            Y = torch.cat([self.pad_sequence(data[1], value=255, seq_len=seq_len, dim=1) for data in batch])
+            X = torch.div(X.float(), 255)
+            for key, value in self.label_map.items():
+                Y = torch.where(Y == key, value, Y)
+            idx = torch.randperm(X.size(0))
+            yield X[idx], Y[idx]
+
+    def __len__(self):
+        return self.n_batches
+    
+class BceLoss(nn.Module):
+    '''Binary cross-entropy loss with optional focal loss'''
+    def __init__(self, focal:bool=True, drop_nan:bool=True, alpha:float=0.25, gamma:float=2.0):
+        super().__init__()
+        self.focal    = focal
+        self.drop_nan = drop_nan
+        self.alpha    = alpha
+        self.gamma    = gamma
+
+    def forward(self, inputs:torch.Tensor, targets:torch.Tensor) -> torch.Tensor:
+        subset = torch.ones(targets.size(), dtype=torch.bool)
+        if self.drop_nan:
+            subset = ~torch.isnan(targets)
+        loss = nn.functional.binary_cross_entropy(inputs[subset], targets[subset], reduction='none')
+        if self.focal:
+            loss = self.alpha * (1 - torch.exp(-loss))**self.gamma * loss
+        loss = torch.mean(loss) #? Mean weighted by number of non-missing
+        return loss
+
 #%% INITIALISES DATA LOADERS
 
-# Datasets
-train_datasets = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_train.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_train.zarr') for city in params.cities]))
-valid_datasets = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_valid.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_valid.zarr') for city in params.cities]))
-test_datasets  = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_test.zarr',  labels_zarr=f'{paths.data}/{city}/zarr/labels_test.zarr')  for city in params.cities]))
+# Initialises datasets
+train_datafiles = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_train.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_train.zarr') for city in params.cities]))
+valid_datafiles = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_valid.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_valid.zarr') for city in params.cities]))
+test_datafiles  = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_test.zarr',  labels_zarr=f'{paths.data}/{city}/zarr/labels_test.zarr')  for city in params.cities]))
+train_datasets  = [ZarrDataset(**train_datafiles[city]) for city in params.cities]
+valid_datasets  = [ZarrDataset(**valid_datafiles[city]) for city in params.cities]
+test_datasets   = [ZarrDataset(**test_datafiles[city])  for city in params.cities]
 
 # Intialises data loaders
-train_loader = [ZarrDatasetXY(**train_datasets[city]) for city in params.cities]
-valid_loader = [ZarrDatasetXY(**valid_datasets[city]) for city in params.cities]
-test_loader  = [ZarrDatasetXY(**test_datasets[city])  for city in params.cities]
-train_loader = ZarrDataLoaderXY(train_loader, batch_size=params.batch_size, label_map=params.label_map)
-valid_loader = ZarrDataLoaderXY(valid_loader, batch_size=params.batch_size, label_map=params.label_map)
-test_loader  = ZarrDataLoaderXY(test_loader,  batch_size=params.batch_size, label_map=params.label_map)
+train_loader = ZarrDataLoader(train_datasets, batch_size=params.batch_size, label_map=params.label_map)
+valid_loader = ZarrDataLoader(valid_datasets, batch_size=params.batch_size, label_map=params.label_map)
+test_loader  = ZarrDataLoader(test_datasets,  batch_size=params.batch_size, label_map=params.label_map)
+
+del train_datafiles, valid_datafiles, test_datafiles, train_datasets, valid_datasets, test_datasets
+
+# Prints excluded cities
+[print(f'Excluding: {city}') for city, size in zip(params.cities, train_loader.slice_sizes) if size == 0]
 
 ''' Checks data loaders
-X, Y = next(iter(train_loader))
+X, Y = next(train_loader)
 for i in range(5):
     display_sequence(X[i], Y[i], grid_size=(5,5))
 del X, Y
 ''' 
 
-# Prints excluded cities
-[print(f'Excluding: {city}') for city, size in zip(params.cities, train_loader.slice_sizes) if size == 0]
-
-#%% INTIALISES MODEL
+#%% INITIALISES MODEL
 
 # Initialises model components
 #? feature_extractor = torch.load(f'{paths.models}/Aerial_SwinB_SI.pth')
@@ -101,8 +176,8 @@ def train(model:nn.Module, train_loader, valid_loader, device:torch.device, crit
             torch.save(model, f'{paths.models}/{model.__class__.__name__}_{label}_best.pth')
             # Shuffles zarr datasets
             for city in params.cities:
-                shuffle_zarr(**train_datasets[city])
-                shuffle_zarr(**valid_datasets[city])
+                shuffle_zarr(**train_datafiles[city])
+                shuffle_zarr(**valid_datafiles[city])
         else:
             counter += 1
             if counter >= patience:

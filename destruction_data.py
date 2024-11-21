@@ -155,7 +155,7 @@ for sample in ['train', 'valid', 'test']:
 
 del sample, src_dataset, dst_dataset, n, T, c, h, w, t
 
-#%% DOWNLOADS FEATURE EXTRACTOR
+#%% DOWNLOADS FEATURE EXTRACTOR (DEPRECIATED)
 
 '''
 import satlaspretrain_models

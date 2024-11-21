@@ -216,58 +216,6 @@ def display_sequence(images:torch.Tensor, titles:list=None, grid_size:tuple=None
 
 #%% DATASET UTILITIES
 
-class ZarrDatasetXY(utils.data.Dataset):
-    '''Zarr dataset for PyTorch'''
-    def __init__(self, images_zarr:str, labels_zarr:str):
-        self.images = zarr.open(images_zarr, mode='r')
-        self.labels = zarr.open(labels_zarr, mode='r')
-        self.length = len(self.images)
-    
-    def __len__(self):
-        return self.length
-    
-    def __getitem__(self, idx):
-        X = torch.from_numpy(self.images[idx])
-        Y = torch.from_numpy(self.labels[idx])
-        return X, Y
-
-class ZarrDataLoaderXY:
-    '''Zarr data loader for PyTorch'''
-    def __init__(self, datasets:list, label_map:dict, batch_size:int):
-        self.datasets    = datasets
-        self.batch_size  = batch_size
-        self.label_map   = label_map
-        self.slice_sizes = None
-        self.n_batches   = None
-        self.compute_slice_sizes()
-
-    def compute_slice_sizes(self):
-        dataset_sizes    = torch.tensor([len(dataset) for dataset in self.datasets])
-        self.slice_sizes = (torch.div(dataset_sizes, dataset_sizes.sum()) * self.batch_size).round().int()
-        self.n_batches   = np.divide(dataset_sizes, self.slice_sizes, where=self.slice_sizes > 0).floor().int()
-        self.n_batches   = self.n_batches[self.n_batches > 0].min()
-    
-    def pad_sequence(self, sequence:torch.Tensor, value:int, seq_len:int=None, dim:int=1) -> torch.Tensor:
-        pad = torch.zeros(2*len(sequence.size()), dtype=int)
-        pad = pad.index_fill(0, torch.tensor(2*dim), seq_len-sequence.size(dim)).flip(0).tolist()
-        pad = nn.functional.pad(sequence, pad=pad, value=value)
-        return pad
-
-    def __iter__(self):
-        data_loaders = [utils.data.DataLoader(dataset, batch_size=int(slice_size)) for dataset, slice_size in zip(self.datasets, self.slice_sizes) if slice_size > 0]
-        for batch in zip(*data_loaders):
-            seq_len = max([data[0].size(1) for data in batch])
-            X = torch.cat([self.pad_sequence(data[0], value=0,   seq_len=seq_len, dim=1) for data in batch])
-            Y = torch.cat([self.pad_sequence(data[1], value=255, seq_len=seq_len, dim=1) for data in batch])
-            X = torch.div(X.float(), 255)
-            for key, value in self.label_map.items():
-                Y = torch.where(Y == key, value, Y)
-            idx = torch.randperm(X.size(0))
-            yield X[idx], Y[idx]
-
-    def __len__(self):
-        return self.n_batches
-
 def shuffle_zarr(images_zarr:str, labels_zarr:str=None) -> None:
     '''Shuffles a Zarr array along the first axis'''
     # Images
@@ -374,24 +322,5 @@ def predict(model:nn.Module, loader, device:torch.device, n_batches:int=None) ->
     Ys  = torch.cat(Ys)
     Yhs = torch.cat(Yhs)
     return Ys, Yhs
-
-class BceLoss(nn.Module):
-    '''Binary cross-entropy loss with optional focal loss'''
-    def __init__(self, focal:bool=True, drop_nan:bool=True, alpha:float=0.25, gamma:float=2.0):
-        super().__init__()
-        self.focal    = focal
-        self.drop_nan = drop_nan
-        self.alpha    = alpha
-        self.gamma    = gamma
-
-    def forward(self, inputs:torch.Tensor, targets:torch.Tensor) -> torch.Tensor:
-        subset = torch.ones(targets.size(), dtype=torch.bool)
-        if self.drop_nan:
-            subset = ~torch.isnan(targets)
-        loss = nn.functional.binary_cross_entropy(inputs[subset], targets[subset], reduction='none')
-        if self.focal:
-            loss = self.alpha * (1 - torch.exp(-loss))**self.gamma * loss
-        loss = torch.mean(loss) #? Mean weighted by number of non-missing
-        return loss
 
 #%%
