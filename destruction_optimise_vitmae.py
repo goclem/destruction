@@ -107,7 +107,7 @@ test_datasets   = [ZarrDataset(datafile) for datafile in test_datafiles]
 preprocessor = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
 train_loader = ZarrDataLoader(datafiles=train_datafiles, datasets=train_datasets, batch_size=params.batch_size, preprocessor=preprocessor)
 valid_loader = ZarrDataLoader(datafiles=valid_datafiles, datasets=valid_datasets, batch_size=params.batch_size, preprocessor=preprocessor)
-test_loader  = ZarrDataLoader(datafiles=test_datafiles,  datasets=test_datasets,  batch_size=params.batch_size, preprocessor=None)
+test_loader  = ZarrDataLoader(datafiles=test_datafiles,  datasets=test_datasets,  batch_size=params.batch_size, preprocessor=preprocessor)
 
 # X = next(test_loader) # Checks data loader
 del train_datafiles, valid_datafiles, test_datafiles, train_datasets, valid_datasets, test_datasets
@@ -155,7 +155,7 @@ def unprocess_images(images:torch.Tensor, preprocessor:nn.Module) -> torch.Tenso
     return images
 
 # Predicts images
-images = next(iter(train_loader)).pixel_values
+images = next(iter(test_loader)).pixel_values
 with torch.no_grad():
     outputs = model(images.to(device))
 
@@ -171,8 +171,8 @@ outputs = inputs + preds
 figdata = torch.stack([images, inputs, preds, outputs], dim=1)
 del images, outputs, masks, preds, inputs
 
-# Plots images, inputs, predictions and outputs
-for i in range(5):
+# Plots images, inputs, predictions and outputs 
+for i in torch.randperm(figdata.shape[0])[:10]:
     fig, axs = plt.subplots(1, 4, figsize=(20, 5))
     for ax, image, title in zip(axs.ravel(), figdata[i], ['Image', 'Input', 'Prediction', 'Output']):
         ax.imshow(image.moveaxis(0, -1))
