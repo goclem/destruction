@@ -19,7 +19,7 @@ import torch
 from destruction_utilities import *
 
 # Utilities
-device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
 params = argparse.Namespace(batch_size=64, cities=['aleppo', 'moschun'])
 
 #%% TRAINING UTILITIES
