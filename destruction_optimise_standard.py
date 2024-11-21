@@ -163,7 +163,6 @@ optimiser = optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
 criterion = BceLoss(focal=False, drop_nan=True, alpha=0.25, gamma=2.0)
 
 def train(model:nn.Module, train_loader, valid_loader, device:torch.device, criterion, optimiser, n_epochs:int=1, patience:int=1, accumulate:int=1, label:str=''):
-    '''Trains a model using a training and validation sample'''
     best_loss, counter = torch.tensor(float('inf')), 0
     for epoch in range(n_epochs):
         print(f'Epoch {epoch+1:03d}/{n_epochs:03d}')

@@ -118,6 +118,7 @@ del train_datafiles, valid_datafiles, test_datafiles, train_datasets, valid_data
 model = transformers.ViTMAEForPreTraining.from_pretrained('facebook/vit-mae-base')
 model = model.to(device)
 
+# Training
 training_args = transformers.TrainingArguments(
     output_dir='../models',
     num_train_epochs=100,
@@ -142,8 +143,9 @@ trainer = ZarrTrainer(
 )
 
 history = trainer.train()
-# model.save_pretrained(f'{paths.models}/mae')
-# del model, training_args, trainer
+
+# Clears GPU memory
+empty_cache(device)
 
 #%% CHECKS RECONSTRUCTIONS
 
