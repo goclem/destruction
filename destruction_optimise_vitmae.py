@@ -162,8 +162,8 @@ with torch.no_grad():
     outputs = model(images.to(device))
 
 # Unprocesses outputs
-masks = outputs.mask.cpu().unsqueeze(-1).repeat(1, 1, model.config.patch_size**2 * 3)
-masks = model.unpatchify(masks).int()
+masks = outputs.mask.unsqueeze(-1).repeat(1, 1, model.config.patch_size**2 * 3)
+masks = model.unpatchify(masks).cpu().int()
 preds = model.unpatchify(outputs.logits.cpu())
 
 images  = unprocess_images(images, preprocessor)
