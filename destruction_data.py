@@ -14,13 +14,21 @@ import geopandas as gpd
 import pandas as pd
 import rasterio
 import zarr
+import argparse
 
 from numpy import random
 from destruction_utilities import *
 
+# Define argument parser
+parser = argparse.ArgumentParser()
+parser.add_argument('--city', type=str, default='aleppo', help='City name')
+
+# Parse command-line arguments
+args = parser.parse_args()
+
 # Utilities
 params = argparse.Namespace(
-    city='moschun', 
+    city=args.city, 
     tile_size=128, 
     train_size=0.50, valid_size=0.25, test_size=0.25,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
@@ -128,7 +136,7 @@ for sample in ['train', 'valid', 'test']:
     destroy = (np.sum(np.isin(labels, destroy), axis=1) > 0).flatten()
     indices = np.concatenate((
         np.where(destroy)[0],
-        np.random.choice(np.where(~destroy)[0], np.sum(destroy), replace=False)))
+        np.random.choice(np.where(~destroy)[0], np.sum(destroy)))) # , replace=False)
     images = images[indices]
     labels = labels[indices]
     # Writes data

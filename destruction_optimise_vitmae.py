@@ -99,6 +99,7 @@ class ZarrTrainer(transformers.Trainer):
 train_datafiles = [f'{paths.data}/{city}/zarr/images_train_vitmae.zarr' for city in params.cities]
 valid_datafiles = [f'{paths.data}/{city}/zarr/images_valid_vitmae.zarr' for city in params.cities]
 test_datafiles  = [f'{paths.data}/{city}/zarr/images_test_vitmae.zarr'  for city in params.cities]
+
 train_datasets  = [ZarrDataset(datafile) for datafile in train_datafiles]
 valid_datasets  = [ZarrDataset(datafile) for datafile in valid_datafiles]
 test_datasets   = [ZarrDataset(datafile) for datafile in test_datafiles]
