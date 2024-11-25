@@ -52,7 +52,7 @@ class ZarrDataLoader:
         slice_sizes  = np.cbrt(self.data_sizes) #! Large impact
         slice_sizes  = np.divide(slice_sizes, slice_sizes.sum())
         slice_sizes  = np.random.multinomial(self.batch_size, slice_sizes, size=int(np.max(self.data_sizes / self.batch_size)))
-        data_indices = np.row_stack((np.zeros(len(self.data_sizes), dtype=int), np.cumsum(slice_sizes, axis=0)))
+        data_indices = np.vstack((np.zeros(len(self.data_sizes), dtype=int), np.cumsum(slice_sizes, axis=0)))
         data_indices = data_indices[np.all(data_indices < self.data_sizes, axis=1)]
         return data_indices
 
@@ -77,7 +77,7 @@ class ZarrDataLoader:
         X = torch.cat(X)
         if self.preprocessor is not None:
             X = self.preprocessor(X.moveaxis(1, -1), return_tensors='pt', do_resize=True)
-        self.batch_index += 1 
+        self.batch_index += 1
         return X
 
 class ZarrTrainer(transformers.Trainer):
@@ -115,7 +115,9 @@ del train_datafiles, valid_datafiles, test_datafiles, train_datasets, valid_data
 #%% FINE-TUNES VITMAE
 
 # Loads pre-trained model
-model = transformers.ViTMAEForPreTraining.from_pretrained('facebook/vit-mae-base')
+config = transformers.ViTMAEConfig.from_pretrained('facebook/vit-mae-base')
+# config.mask_ratio = 0.9
+model = transformers.ViTMAEForPreTraining.from_pretrained('facebook/vit-mae-base', config=config)
 model = model.to(device)
 
 # Training
@@ -157,7 +159,7 @@ def unprocess_images(images:torch.Tensor, preprocessor:nn.Module) -> torch.Tenso
     return images
 
 # Predicts images
-images = next(iter(test_loader)).pixel_values
+images = next(test_loader).pixel_values
 with torch.no_grad():
     outputs = model(images.to(device))
 
