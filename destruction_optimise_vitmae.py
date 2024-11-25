@@ -116,7 +116,7 @@ del train_datafiles, valid_datafiles, test_datafiles, train_datasets, valid_data
 
 # Loads pre-trained model
 config = transformers.ViTMAEConfig.from_pretrained('facebook/vit-mae-base')
-# config.mask_ratio = 0.9
+config.mask_ratio = 0.75
 model = transformers.ViTMAEForPreTraining.from_pretrained('facebook/vit-mae-base', config=config)
 model = model.to(device)
 
