@@ -141,7 +141,8 @@ trainer = ZarrTrainer(
     model=model,
     args=training_args,
     train_dataloader=train_loader,
-    eval_dataloader=valid_loader
+    eval_dataloader=valid_loader,
+    eval_dataset=utils.data.Dataset() # Dummy dataset to fix the transformers.Trainer bug
 )
 
 history = trainer.train()
