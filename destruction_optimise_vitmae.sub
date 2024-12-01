@@ -1,5 +1,5 @@
 universe = vanilla
-executable              = destruction_optimise.sh
+executable              = destruction_optimise_vitmae.sh
 # arguments               = 
 log                     = condor_logs/logfile.$(Cluster).$(Process).log
 output                  = condor_logs/outfile.$(Cluster).$(Process).out
