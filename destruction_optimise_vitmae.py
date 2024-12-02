@@ -20,7 +20,16 @@ from destruction_utilities import *
 
 # Utilities
 device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
-params = argparse.Namespace(batch_size=64, cities=['aleppo', 'moschun'])
+# params = argparse.Namespace(batch_size=64, cities=['aleppo', 'moschun']) # for localtesting
+
+# Define argument parser
+parser = argparse.ArgumentParser()
+parser.add_argument('--cities', nargs='+', type=str, default=['aleppo', 'moschun'], help='List of city names')
+
+# Parse command-line arguments
+params = parser.parse_args()
+
+print(params.cities)
 
 #%% TRAINING UTILITIES
 
