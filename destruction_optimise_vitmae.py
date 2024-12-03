@@ -25,7 +25,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.ba
 # Define argument parser
 parser = argparse.ArgumentParser()
 parser.add_argument('--cities', nargs='+', type=str, default=['aleppo', 'moschun'], help='List of city names')
-parser.add_argument('--batch_size', default=32, help='Batch sizes')
+parser.add_argument('--batch_size', default=64, help='Batch sizes')
 
 # Parse command-line arguments
 params = parser.parse_args()
@@ -131,7 +131,7 @@ model = model.to(device)
 
 # Training
 training_args = transformers.TrainingArguments(
-    output_dir='../models',
+    output_dir='/lustre/ific.uv.es/ml/iae091/models',
     num_train_epochs=100,
     per_device_train_batch_size=params.batch_size,
     per_device_eval_batch_size=params.batch_size,
