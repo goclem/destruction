@@ -132,7 +132,7 @@ for city, share in train_shares.items():
     print(f' - {city:<8} {share:.04f}')
 
 #%% FINE-TUNES VITMAE
-
+"""
 # Loads pre-trained model
 model = transformers.ViTMAEForPreTraining.from_pretrained('facebook/vit-mae-base')
 model = model.to(device)
@@ -202,4 +202,4 @@ for i in torch.randperm(figdata.shape[0])[:10]:
         ax.set_axis_off()
     plt.show()
 
-#%%
+#%%"""
