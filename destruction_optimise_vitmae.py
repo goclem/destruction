@@ -112,6 +112,14 @@ test_loader  = ZarrDataLoader(datafiles=test_datafiles,  datasets=test_datasets,
 # X = next(test_loader) # Checks data loader
 del train_datafiles, valid_datafiles, test_datafiles, train_datasets, valid_datasets, test_datasets
 
+# Prints data loader information
+print(f'Number of batches per epoch:\n - Train {len(train_loader)}\n - Valid {len(valid_loader)}\n - Test  {len(test_loader)}')
+
+print(f'Shares of training tiles per epoch:')
+train_shares = dict(zip(params.cities, (train_loader.data_indices[-1] / train_loader.data_sizes).tolist()))
+for city, share in train_shares.items():
+    print(f' - {city:<8} {share:.04f}')
+
 #%% FINE-TUNES VITMAE
 
 # Loads pre-trained model
