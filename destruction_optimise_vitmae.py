@@ -20,7 +20,7 @@ from destruction_utilities import *
 
 # Utilities
 device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
-params = argparse.Namespace(batch_size=64, cities=['aleppo', 'moschun'])
+params = argparse.Namespace(batch_size=64, cities=['moschun'])
 
 #%% TRAINING UTILITIES
 
@@ -138,12 +138,10 @@ training_args = transformers.TrainingArguments(
     lr_scheduler_type='linear',
     warmup_steps=100,
     output_dir='../models/vitmae',
-    logging_dir='../models/vitmae/logs',
-    save_strategy='epoch',
     eval_strategy='epoch',
-    logging_strategy='epoch',
-    load_best_model_at_end=True,
-    metric_for_best_model='eval_runtime'
+    evaluation_strategy='epoch',
+    logging_dir='../models/vitmae_logs',
+    logging_strategy='epoch'
 )
 
 trainer = ZarrTrainer(
