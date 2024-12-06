@@ -130,7 +130,6 @@ model = model.to(device)
 
 # Training
 training_args = transformers.TrainingArguments(
-    output_dir='../models',
     num_train_epochs=100,
     per_device_train_batch_size=params.batch_size,
     per_device_eval_batch_size=params.batch_size,
@@ -138,11 +137,13 @@ training_args = transformers.TrainingArguments(
     weight_decay=0.01,
     lr_scheduler_type='linear',
     warmup_steps=100,
+    output_dir='../models/vitmae',
+    logging_dir='../models/vitmae/logs',
     save_strategy='epoch',
     eval_strategy='epoch',
+    logging_strategy='epoch',
     load_best_model_at_end=True,
-    metric_for_best_model='eval_runtime',
-    logging_strategy='no'
+    metric_for_best_model='eval_runtime'
 )
 
 trainer = ZarrTrainer(
