@@ -22,8 +22,8 @@ from destruction_utilities import *
 device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
 params = argparse.Namespace(
     cities=['aleppo', 'moschun'],
-    batch_size=16,
-    seq_len=20,
+    batch_size=8,
+    seq_len=10,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
 
 #%% TRAINING UTILITIES
@@ -43,10 +43,9 @@ class ZarrDataset(utils.data.Dataset):
         Y = torch.from_numpy(self.labels[idx])
         return X, Y
 
-
 class ZarrDataLoader:
 
-    def __init__(self, datafiles:list, datasets:list, label_map:dict, batch_size:int, seq_len:int, preprocessor=None):
+    def __init__(self, datafiles:list, datasets:list, label_map:dict, batch_size:int, seq_len:int):
         self.datafiles    = datafiles
         self.datasets     = datasets
         self.label_map    = label_map
@@ -55,7 +54,6 @@ class ZarrDataLoader:
         self.batch_index  = 0
         self.data_sizes   = np.array([len(dataset) for dataset in datasets])
         self.data_indices = self.compute_data_indices()
-        self.preprocessor = preprocessor
 
     def compute_data_indices(self):
         slice_sizes  = np.cbrt(self.data_sizes)
@@ -64,7 +62,20 @@ class ZarrDataLoader:
         data_indices = np.vstack((np.zeros(len(self.data_sizes), dtype=int), np.cumsum(slice_sizes, axis=0)))
         data_indices = data_indices[np.all(data_indices < self.data_sizes, axis=1)]
         return data_indices
+    
+    def crop_sequence(self, x:torch.Tensor, y:torch.Tensor, seq_len:int, dim:int=1) -> torch.Tensor:
+        start = torch.randint(low=0, high=x.size(dim) - seq_len + 1, size=(1, )).item()
+        x = x.narrow(dim=dim, start=start, length=seq_len)
+        y = y.narrow(dim=dim, start=start, length=seq_len)
+        return x, y
 
+    def pad_sequence(self, x:torch.Tensor, y:torch.Tensor, seq_len:int, dim:int=1) -> torch.Tensor:
+        x_pad = torch.zeros(2 * x.ndim, dtype=int).index_fill(0, -torch.tensor(2 * dim + 1), seq_len - x.size(dim))
+        y_pad = torch.zeros(2 * y.ndim, dtype=int).index_fill(0, -torch.tensor(2 * dim + 1), seq_len - y.size(dim))
+        x = nn.functional.pad(x, pad=x_pad.tolist(), value=0)
+        y = nn.functional.pad(y, pad=y_pad.tolist(), value=255)
+        return x, y
+    
     def __len__(self):
         return len(self.data_indices) - 1
     
@@ -75,19 +86,6 @@ class ZarrDataLoader:
             shuffle_zarr(datafile)
         return self
 
-    def crop_sequence(self, X:torch.Tensor, Y:torch.Tensor, length:int, dim:int=1) -> torch.Tensor:
-        start = torch.randint(low=0, high=X.size(dim) - length + 1, size=(1, )).item()
-        X = X.narrow(dim, start, length)
-        Y = Y.narrow(dim, start, length)
-        return X, Y
-
-    def pad_sequence(self, X:torch.Tensor, Y:torch.Tensor, length:int, dim:int=1) -> torch.Tensor:
-        x_pad = torch.zeros(2 * X.ndim, dtype=int).index_fill(0, - torch.tensor(2 * dim + 1), length - X.size(dim))
-        y_pad = torch.zeros(2 * Y.ndim, dtype=int).index_fill(0, - torch.tensor(2 * dim + 1), length - Y.size(dim))
-        X = nn.functional.pad(X, pad=x_pad.tolist(), value=0)
-        Y = nn.functional.pad(Y, pad=y_pad.tolist(), value=255)
-        return X, Y
-    
     def __next__(self):
         if self.batch_index == len(self):
             raise StopIteration 
@@ -96,22 +94,19 @@ class ZarrDataLoader:
         for dataset, indices in zip(self.datasets, self.data_indices.T):
             start = indices[self.batch_index]
             end   = indices[self.batch_index + 1]
-            X_ds, Y_ds = dataset[start:end]
-            X.append(X_ds), 
-            Y.append(Y_ds)
+            if start != end: # Skips empty batches
+                X_ds, Y_ds = dataset[start:end]
+                X.append(X_ds), 
+                Y.append(Y_ds)
         # Normalises sequences
         for i in range(len(X)):
             if X[i].size(1) > self.seq_len:
-                X[i], Y[i] = self.crop_sequence(X[i], Y[i], length=self.seq_len)
+                X[i], Y[i] = self.crop_sequence(x=X[i], y=Y[i], seq_len=self.seq_len)
             elif X[i].size(1) < self.seq_len:
-                X[i], Y[i] = self.pad_sequence(X[i],  Y[i], length=self.seq_len)
+                X[i], Y[i] = self.pad_sequence(x=X[i], y=Y[i], seq_len=self.seq_len)
         X = torch.cat(X)
         Y = torch.cat(Y)
-        # Preprocesses sequences
-        if self.preprocessor is not None:
-            n, t, c, h, w = X.size()
-            X  = self.preprocessor(X.reshape(-1, c, h, w), return_tensors='pt', do_resize=True)['pixel_values']
-            X  = X.reshape(n * t, c, 224, 224)
+        # Remaps labels
         for key, value in self.label_map.items():
             Y = torch.where(Y == key, value, Y)    
         # Updates batch index
@@ -155,6 +150,9 @@ test_loader  = ZarrDataLoader(datafiles=test_datafiles,  datasets=test_datasets,
 del train_datafiles, valid_datafiles, test_datafiles, train_datasets, valid_datasets, test_datasets
 
 ''' Checks data loaders
+train_loader.batch_index
+len(train_loader.data_indices)
+
 X, Y = next(train_loader)
 for i in range(5):
     display_sequence(X[i], Y[i], grid_size=(4, 5))
@@ -162,10 +160,21 @@ del X, Y
 ''' 
 
 #%% INITIALISES MODEL
+preprocessor = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
+if self.preprocessor is not None:
+    n, t, c, h, w = X.size()
+    X = self.preprocessor(X.reshape(-1, c, h, w), return_tensors='pt', do_resize=True)['pixel_values']
+    X = X.reshape(n, t, c, 224, 224)
 
 # Initialises model components #! Change model path
-config = transformers.ViTMAEConfig.from_pretrained('facebook/vit-mae-base')
-model  = transformers.ViTMAEModel.from_pretrained('facebook/vit-mae-base', config=config)
+config    = transformers.ViTMAEConfig.from_pretrained('facebook/vit-mae-base')
+extractor = transformers.ViTMAEModel.from_pretrained('facebook/vit-mae-base', config=config)
+outputs = extractor(X.view(-1, 3, 224, 224)) # Initialises model
+outputs.last_hidden_state[:, 0, :].shape
+
+
+
+
 model  = model.to(device)
 
 
