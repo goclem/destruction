@@ -172,8 +172,8 @@ class ModelWrapper(nn.Module):
     def forward(self, X:torch.Tensor) -> torch.Tensor:
         # Encodes images
         H = X.view(-1, 3, 128, 128) # n x t x c x h x w > nt x c x h x w
-        H = self.preprocessor(H, return_tensors='pt', do_resize=True)
-        H = self.image_encoder(**H.to(device)) # nt x c x h x w > nt x d x k
+        H = self.preprocessor(H, return_tensors='pt', do_resize=True) # nt x c x h x w > nt x c x h' x w'
+        H = self.image_encoder(**H.to(device)) # nt x c x h' x w' > nt x d x k
         H = H.last_hidden_state[:, 0, :] # nt x d x k > nt x k
         H = H.view(X.size(0), X.size(1), H.size(-1)) # nt x k > n x t x k
         # Encodes sequence
