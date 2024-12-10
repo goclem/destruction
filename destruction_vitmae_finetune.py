@@ -16,6 +16,8 @@ import numpy as np
 import transformers
 import torch
 
+from torch import optim
+from destruction_models import *
 from destruction_utilities import *
 
 # Utilities
@@ -81,9 +83,10 @@ class ZarrDataLoader:
     
     def __iter__(self):
         self.batch_index = 0
-        for datafile in self.datafiles:
-            print(f'Shuffling {datafile}')
-            shuffle_zarr(datafile)
+        for city in self.datafiles:
+            print(f'Shuffling {city}')
+            shuffle_zarr(self.datafiles[city]['images_zarr'])
+            shuffle_zarr(self.datafiles[city]['labels_zarr'])
         return self
 
     def __next__(self):
@@ -150,9 +153,6 @@ test_loader  = ZarrDataLoader(datafiles=test_datafiles,  datasets=test_datasets,
 del train_datafiles, valid_datafiles, test_datafiles, train_datasets, valid_datasets, test_datasets
 
 ''' Checks data loaders
-train_loader.batch_index
-len(train_loader.data_indices)
-
 X, Y = next(train_loader)
 for i in range(5):
     display_sequence(X[i], Y[i], grid_size=(4, 5))
@@ -160,76 +160,91 @@ del X, Y
 ''' 
 
 #%% INITIALISES MODEL
-preprocessor = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
-if self.preprocessor is not None:
-    n, t, c, h, w = X.size()
-    X = self.preprocessor(X.reshape(-1, c, h, w), return_tensors='pt', do_resize=True)['pixel_values']
-    X = X.reshape(n, t, c, 224, 224)
+
+class ModelWrapper(nn.Module):
+    def __init__(self, preprocessor:nn.Module, image_encoder:nn.Module, sequence_encoder:nn.Module, prediction_head:nn.Module):
+        super().__init__()
+        self.preprocessor     = preprocessor
+        self.image_encoder    = image_encoder
+        self.sequence_encoder = sequence_encoder
+        self.prediction_head  = prediction_head
+
+    def forward(self, X:torch.Tensor) -> torch.Tensor:
+        # Encodes images
+        H = X.view(-1, 3, 128, 128) # n x t x c x h x w > nt x c x h x w
+        H = self.preprocessor(H, return_tensors='pt', do_resize=True)
+        H = self.image_encoder(**H.to(device)) # nt x c x h x w > nt x d x k
+        H = H.last_hidden_state[:, 0, :] # nt x d x k > nt x k
+        H = H.view(X.size(0), X.size(1), H.size(-1)) # nt x k > n x t x k
+        # Encodes sequence
+        H = self.sequence_encoder(H) # n x t x k > n x t x k
+        Y = self.prediction_head(H)  # n x t x k > n x t x 1
+        return Y
 
 # Initialises model components #! Change model path
-config    = transformers.ViTMAEConfig.from_pretrained('facebook/vit-mae-base')
-extractor = transformers.ViTMAEModel.from_pretrained('facebook/vit-mae-base', config=config)
-outputs = extractor(X.view(-1, 3, 224, 224)) # Initialises model
-outputs.last_hidden_state[:, 0, :].shape
+preprocessor     = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
+image_config     = transformers.ViTMAEConfig.from_pretrained('facebook/vit-mae-base')
+image_encoder    = transformers.ViTMAEModel.from_pretrained('facebook/vit-mae-base', config=image_config)
+sequence_config  = dict(input_dim=768, max_length=23, n_heads=4, hidden_dim=768, n_layers=2, dropout=0.0)
+sequence_encoder = SequenceEncoder(**sequence_config)
+prediction_head  = PredictionHead(input_dim=768, output_dim=1)
 
-
-
-
-model  = model.to(device)
-
-
-
-feature_extractor = ResNextExtractor(dropout=0.0)
-image_encoder     = ImageEncoder(feature_extractor=feature_extractor)
-sequence_encoder  = dict(input_dim=512, max_length=25, n_heads=4, hidden_dim=512, n_layers=2, dropout=0.0)
-sequence_encoder  = SequenceEncoder(**sequence_encoder)
-prediction_head   = PredictionHead(input_dim=512, output_dim=1)
-
-# Initialises model wrapper
-model = ModelWrapper(image_encoder, sequence_encoder, prediction_head)
-model.to(device)
-
-# Checks model parameters
+# Initialises model
+model = ModelWrapper(preprocessor, image_encoder, sequence_encoder, prediction_head)
+model = model.to(device)
 count_parameters(model)
-count_parameters(model.image_encoder)
-count_parameters(model.sequence_encoder)
 
-del image_encoder, sequence_encoder, prediction_head
+del preprocessor, image_encoder, sequence_encoder, prediction_head
 
 #%% ALIGNING PARAMETERS
 
-''' #? Loads previous checkpoint
-if path.exists(f'{paths.models}/ModelWrapper_best.pth'):
-    model = torch.load(f'{paths.models}/ModelWrapper_best.pth')
-'''
-
-#? Parameter alignment i.e. freezes image encoder's parameters
-# set_trainable(model.image_encoder.feature_extractor, False)
-# count_parameters(model)
-
-optimiser = optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
-criterion = BceLoss(focal=False, drop_nan=True, alpha=0.25, gamma=2.0)
-
-def train(model:nn.Module, train_loader, valid_loader, device:torch.device, criterion, optimiser, n_epochs:int=1, patience:int=1, accumulate:int=1, label:str=''):
+def train(model:nn.Module, train_loader, valid_loader, device:torch.device, criterion, optimiser, model_path:str, n_epochs:int=1, patience:int=1, accumulate:int=1):
     best_loss, counter = torch.tensor(float('inf')), 0
     for epoch in range(n_epochs):
         print(f'Epoch {epoch+1:03d}/{n_epochs:03d}')
-        train_loss = optimise(model=model, loader=train_loader, device=device, criterion=criterion, optimiser=optimiser, accumulate=accumulate)
+        train_loss = optimise(model=model, train_loader=train_loader, device=device, criterion=criterion, optimiser=optimiser, accumulate=accumulate)
         # Early stopping
         valid_loss = validate(model=model, loader=valid_loader, device=device, criterion=criterion)
         if valid_loss < best_loss:
             best_loss = valid_loss
             counter = 0
-            torch.save(model, f'{paths.models}/{model.__class__.__name__}_{label}_best.pth')
-            # Shuffles zarr datasets
-            for city in params.cities:
-                shuffle_zarr(**train_datafiles[city])
-                shuffle_zarr(**valid_datafiles[city])
+            torch.save(model, model_path)
         else:
             counter += 1
             if counter >= patience:
                 print('- Early stopping')
                 break
+
+# Freezes image encoder's parameters
+set_trainable(model.image_encoder, False)
+count_parameters(model)
+
+optimiser = optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
+criterion = BceLoss(focal=True, drop_nan=True, alpha=0.25, gamma=2.0)
+
+# Training
+train(model=model, 
+      train_loader=train_loader, 
+      valid_loader=valid_loader, 
+      device=device,
+      criterion=criterion, 
+      optimiser=optimiser, 
+      model_path='../models/vitmae_align.pth',
+      n_epochs=100, 
+      patience=3,
+      accumulate=4)
+
+# Clears GPU memory
+empty_cache(device)
+
+#%% FINE TUNES MODEL
+
+# Unfreezes image encoder's parameters
+set_trainable(model.image_encoder, True)
+count_parameters(model)
+
+optimiser = optim.AdamW(model.parameters(), lr=1e-5, betas=(0.9, 0.999))
+criterion = BceLoss(focal=True, drop_nan=True, alpha=0.25, gamma=2.0)
 
 # Training
 train(model=model, 
@@ -237,76 +252,13 @@ train(model=model,
       valid_loader=valid_loader, 
       device=device, 
       criterion=criterion, 
-      optimiser=optimiser, 
-      n_epochs=25, 
+      optimiser=optimiser,
+      model_path='../models/vitmae_finetune.pth',
+      n_epochs=100, 
       patience=3,
-      accumulate=4,
-      label='resnext_encoder')
+      accumulate=4)
 
 # Clears GPU memory
 empty_cache(device)
-
-#%% FINE TUNES ENTIRE MODEL
-
-'''
-#? Fine tuning i.e. unfreezes image encoder's parameters
-model = torch.load(f'{paths.models}/ModelWrapper_aligmnent_best.pth') # Loads best model
-set_trainable(model.image_encoder.feature_extractor, True)
-
-optimiser = optim.AdamW(model.parameters(), lr=1e-5)
-count_parameters(model)
-
-train(model=model, 
-      train_loader=train_loader, 
-      valid_loader=valid_loader, 
-      device=device, 
-      criterion=criterion, 
-      optimiser=optimiser, 
-      n_epochs=25, 
-      patience=3,
-      accumulate=4,
-      label='finetuning')
-
-# Clears GPU memory
-empty_cache(device)
-'''
-
-#%% ESTIMATES THRESHOLD
-
-model = torch.load(f'{paths.models}/ModelWrapper_finetuning_best.pth') # Loads best model
-
-def compute_threshold(model:nn.Module, loader, device:torch.device, n_batches:int=None) -> float:
-    '''Estimates threshold for binary classification'''
-    Y, Yh  = predict(model, loader=train_loader, device=device, n_batches=n_batches)
-    subset = ~Y.isnan()
-    fpr, tpr, thresholds = metrics.roc_curve(Y[subset].cpu(), Yh[subset].cpu())
-    threshold = thresholds[np.argmax(tpr - fpr)]
-    return threshold
-
-# Threshold estimation  
-threshold = compute_threshold(model=model, loader=train_loader, device=device)
-print(f'Threshold: {threshold:.2f}')
-
-# Testing
-validate(model=model, loader=test_loader, device=device, criterion=criterion, threshold=threshold)
-
-#%% CHECKS PREDICTIONS
-
-model.eval()
-X, Y = next(iter(test_loader))
-susbset = torch.sum(Y==1, axis=(1, 2)) > 0
-X, Y = X[susbset], Y[susbset]
-
-with torch.no_grad():
-    Yh = model(X.to(device)).cpu()
-Y, Yh  = Y.squeeze(), Yh.squeeze()
-
-threshold = 0.5
-status = torch.where(torch.isnan(Y), torch.nan, torch.eq(Y, Yh > threshold))
-
-for i in np.random.choice(range(len(X)), 2, replace=False):
-    titles = [f'{s:.0f}\nY: {y:.0f} - Yh: {yh > threshold:.0f} ({yh:.2f})' for s, y, yh in zip(status[i], Y[i], Yh[i])]
-    display_sequence(X[i], titles, grid_size=(5,5))
-del titles
 
 #%%

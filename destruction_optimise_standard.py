@@ -166,7 +166,7 @@ def train(model:nn.Module, train_loader, valid_loader, device:torch.device, crit
     best_loss, counter = torch.tensor(float('inf')), 0
     for epoch in range(n_epochs):
         print(f'Epoch {epoch+1:03d}/{n_epochs:03d}')
-        train_loss = optimise(model=model, loader=train_loader, device=device, criterion=criterion, optimiser=optimiser, accumulate=accumulate)
+        train_loss = optimise(model=model, train_loader=train_loader, device=device, criterion=criterion, optimiser=optimiser, accumulate=accumulate)
         # Early stopping
         valid_loss = validate(model=model, loader=valid_loader, device=device, criterion=criterion)
         if valid_loss < best_loss:
