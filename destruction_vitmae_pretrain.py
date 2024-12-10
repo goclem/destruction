@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 '''
-@description: Vision transformer masked auto-encoder
+@description: Pretrains a vision transformer using the masked auto-encoder scheme
 @authors: Clement Gorin, Dominik Wielath
 @contact: clement.gorin@univ-paris1.fr
 '''
@@ -20,7 +20,7 @@ from destruction_utilities import *
 
 # Utilities
 device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
-params = argparse.Namespace(batch_size=64, cities=['moschun'])
+params = argparse.Namespace(batch_size=64, cities=['aleppo', 'moschun'])
 
 #%% TRAINING UTILITIES
 
@@ -159,6 +159,7 @@ empty_cache(device)
 
 #%% CHECKS RECONSTRUCTIONS
 
+'''
 def unprocess_images(images:torch.Tensor, preprocessor:nn.Module) -> torch.Tensor:
     means  = torch.Tensor(preprocessor.image_mean).view(3, 1, 1)
     stds   = torch.Tensor(preprocessor.image_std).view(3, 1, 1)
@@ -191,5 +192,6 @@ for i in torch.randperm(figdata.shape[0])[:10]:
         ax.set_title(title, fontsize=15)
         ax.set_axis_off()
     plt.show()
+'''
 
 #%%
