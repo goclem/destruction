@@ -20,7 +20,7 @@ from destruction_utilities import *
 
 # Utilities
 params = argparse.Namespace(
-    city='aleppo', 
+    city='aleppo', # moschun
     tile_size=128, 
     train_size=0.50, valid_size=0.25, test_size=0.25,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
@@ -126,9 +126,58 @@ for sample in ['train', 'valid', 'test']:
     # Subsets datasets
     destroy = [k for k, v in params.label_map.items() if v == 1]
     destroy = (np.sum(np.isin(labels, destroy), axis=1) > 0).flatten()
+    untouch = np.where(~destroy)[0]
     indices = np.concatenate((
         np.where(destroy)[0],
-        np.random.choice(np.where(~destroy)[0], np.sum(destroy), replace=False)))
+        np.random.choice(untouch, np.sum(destroy), replace=False)))
+    images = images[indices]
+    labels = labels[indices]
+    np.random.shuffle(indices)
+    # Writes data
+    dataset = zarr.open(images_zarr, shape=images.shape, dtype=images.dtype, mode='w')
+    dataset[:] = images
+    dataset = zarr.open(labels_zarr, shape=labels.shape, dtype=labels.dtype, mode='w')
+    dataset[:] = labels
+
+del sample, images_zarr, labels_zarr, images, labels, destroy, untouch, indices, dataset
+
+#%% RESHAPES ZARR DATASETS FOR THE VITMAE MODEL
+
+for sample in ['train', 'valid', 'test']:
+    print(f'Processing sample {sample}')
+    src_images = f'{paths.data}/{params.city}/zarr/images_{sample}.zarr'
+    src_labels = f'{paths.data}/{params.city}/zarr/labels_{sample}.zarr'
+    src_images = zarr.open(src_images, mode='r')
+    src_labels = zarr.open(src_labels, mode='r')
+    n, T, c, h, w = src_images.shape
+    dst_images = f'{paths.data}/{params.city}/zarr/images_{sample}_vitmae.zarr'
+    dst_labels = f'{paths.data}/{params.city}/zarr/labels_{sample}_vitmae.zarr'
+    dst_images = zarr.open(dst_images, mode='w', shape=(n * T, c, h, w), dtype=src_images.dtype)
+    dst_labels = zarr.open(dst_labels, mode='w', shape=(n * T, 1), dtype=src_labels.dtype)
+    for t in range(T):
+        dst_images[t*n:(t+1)*n,:] = src_images[:,t,:]
+        dst_labels[t*n:(t+1)*n,:] = src_labels[:,t,:]
+
+del sample, src_images, src_labels, dst_images, dst_labels, n, T, c, h, w, t
+
+#%% DOWNSAMPLES NO-DESTRUCTION TILES
+
+for sample in ['train', 'valid', 'test']:
+    print(f'Processing sample {sample}')
+    # Define paths
+    images_zarr = f'{paths.data}/{params.city}/zarr/images_{sample}_vitmae.zarr'
+    labels_zarr = f'{paths.data}/{params.city}/zarr/labels_{sample}_vitmae.zarr'
+    # Loads data
+    images = zarr.open(images_zarr, mode='r')[:]
+    labels = zarr.open(labels_zarr, mode='r')[:]
+    # Subsets datasets
+    destroy = [k for k, v in params.label_map.items() if v == 1]
+    destroy = np.isin(labels, destroy).flatten()
+    untouch = np.where(np.logical_and(~destroy, ~np.isnan(labels.flatten())))[0]
+    indices = np.concatenate((
+        np.where(destroy)[0],
+        np.random.choice(untouch, np.sum(destroy), replace=False)))
+    np.random.shuffle(indices)
     images = images[indices]
     labels = labels[indices]
     # Writes data
@@ -136,32 +185,7 @@ for sample in ['train', 'valid', 'test']:
     dataset[:] = images
     dataset = zarr.open(labels_zarr, shape=labels.shape, dtype=labels.dtype, mode='w')
     dataset[:] = labels
-    # Shuffles datasets
-    shuffle_zarr(images_zarr, labels_zarr)
 
 del sample, images_zarr, labels_zarr, images, labels, destroy, indices, dataset
 
-#%% RESHAPES ZARR DATASETS FOR THE VITMAE MODEL
-
-for sample in ['train', 'valid', 'test']:
-    print(f'Processing sample {sample}')
-    src_dataset   = f'{paths.data}/{params.city}/zarr/images_{sample}.zarr'
-    src_dataset   = zarr.open(src_dataset, mode='r')
-    n, T, c, h, w = src_dataset.shape
-    dst_dataset   = f'{paths.data}/{params.city}/zarr/images_{sample}_vitmae.zarr'
-    dst_dataset   = zarr.open(dst_dataset, mode='w', shape=(n * T, c, h, w), dtype=src_dataset.dtype)
-    for t in range(T):
-        dst_dataset[t*n:(t+1)*n,:] = src_dataset[:,t,:]
-
-del sample, src_dataset, dst_dataset, n, T, c, h, w, t
-
-#%% DOWNLOADS FEATURE EXTRACTOR (DEPRECIATED)
-
-'''
-import satlaspretrain_models
-
-feature_extractor = satlaspretrain_models.Weights()
-feature_extractor = feature_extractor.get_pretrained_model(model_identifier='Aerial_SwinB_SI', fpn=True, device='cpu')
-torch.save(feature_extractor, f'{paths.models}/Aerial_SwinB_SI.pth')
-del feature_extractor
-'''
+#%%
