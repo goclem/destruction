@@ -23,7 +23,7 @@ from destruction_utilities import *
 # Utilities
 device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
 params = argparse.Namespace(
-    cities=['aleppo', 'moschun'],
+    cities=['aleppo'],
     batch_size=64,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
 
@@ -57,7 +57,7 @@ class ZarrDataLoader:
         self.preprocessor = preprocessor
 
     def compute_data_indices(self):
-        slice_sizes  = np.cbrt(self.data_sizes) #! Large impact
+        slice_sizes  = np.cbrt(self.data_sizes)
         slice_sizes  = np.divide(slice_sizes, slice_sizes.sum())
         slice_sizes  = np.random.multinomial(self.batch_size, slice_sizes, size=int(np.max(self.data_sizes / self.batch_size)))
         data_indices = np.vstack((np.zeros(len(self.data_sizes), dtype=int), np.cumsum(slice_sizes, axis=0)))
@@ -113,6 +113,13 @@ class BceLoss(nn.Module):
         loss = torch.mean(loss)
         return loss
 
+def unprocess_images(images:torch.Tensor, preprocessor:nn.Module) -> torch.Tensor:
+    means  = torch.Tensor(preprocessor.image_mean).view(3, 1, 1)
+    stds   = torch.Tensor(preprocessor.image_std).view(3, 1, 1)
+    images = (images * stds + means) * 255
+    images = torch.clip(images, 0, 255).to(torch.uint8)
+    return images
+
 #%% INITIALISES DATA LOADERS
 
 # Initialises datasets
@@ -133,8 +140,9 @@ del train_datafiles, valid_datafiles, test_datafiles, train_datasets, valid_data
 
 ''' Checks data loaders
 X, Y = next(train_loader)
-idx  = np.random.choice(range(len(X)), size=25, replace=False)
-display_sequence(X[idx], Y[idx], grid_size=(5, 5))
+X = unprocess_images(X['pixel_values'], preprocessor)
+idx  = np.random.choice(range(len(X)), size=9, replace=False)
+display_sequence(X[idx], Y[idx], grid_size=(3, 3))
 del idx, X, Y
 ''' 
 
@@ -160,7 +168,6 @@ prediction_head = PredictionHead(input_dim=768, output_dim=1)
 # Initialises model
 model = ModelWrapper(image_encoder, prediction_head)
 model = model.to(device)
-count_parameters(model)
 
 del preprocessor, image_encoder, prediction_head
 
@@ -184,8 +191,10 @@ def train(model:nn.Module, train_loader, valid_loader, device:torch.device, crit
                 break
 
 # Loss and optimiser
-criterion = BceLoss(focal=True, drop_nan=True, alpha=0.25, gamma=2.0)
 set_trainable(model.image_encoder, False)
+count_parameters(model)
+
+criterion = BceLoss(focal=True, drop_nan=True, alpha=0.25, gamma=2.0)
 optimiser = optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
 
 # Training
@@ -206,8 +215,10 @@ empty_cache(device)
 #%% FINES TUNES MODEL
 
 # Loss and optimiser
-criterion = BceLoss(focal=True, drop_nan=True, alpha=0.25, gamma=2.0)
 set_trainable(model.image_encoder, True)
+count_parameters(model)
+
+criterion = BceLoss(focal=True, drop_nan=True, alpha=0.25, gamma=2.0)
 optimiser = optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
 
 # Training

@@ -266,7 +266,7 @@ def optimise(model:nn.Module, train_loader, device:torch.device, criterion, opti
         # Optimisation
         optimiser.zero_grad()
         X, Y = X.to(device), Y.to(device)
-        Yh = model(X)
+        Yh   = model(X)
         loss = criterion(Yh, Y)
         loss.backward()
         # Gradient accumulation

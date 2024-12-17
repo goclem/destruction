@@ -96,6 +96,7 @@ samples = search_data(f'{params.city}_samples.tif$')
 samples = load_sequences(samples, tile_size=1).squeeze()
 
 # Writes zarr arrays
+print('Writes Zarr arrays')
 for i, (image, label) in enumerate(zip(images, labels)):
     print(f'Processing period {i+1:02d}/{len(images)}')
     # Loads images and labels
@@ -115,6 +116,7 @@ del images, labels, samples, i, image, label, arrays, sample, value, array, shap
 
 #%% DOWNSAMPLES NO-DESTRUCTION SEQUENCES
 
+print('Downsamples no-destruction sequences')
 for sample in ['train', 'valid', 'test']:
     print(f'Processing sample {sample}')
     # Define paths
@@ -143,8 +145,9 @@ del sample, images_zarr, labels_zarr, images, labels, destroy, untouch, indices,
 
 #%% RESHAPES ZARR DATASETS FOR THE VITMAE MODEL
 
+print('Reshapes Zarr datasets for the VITMAE model')
 for sample in ['train', 'valid', 'test']:
-    print(f'Processing sample {sample}')
+    print(f' - Processing sample {sample}')
     src_images = f'{paths.data}/{params.city}/zarr/images_{sample}.zarr'
     src_labels = f'{paths.data}/{params.city}/zarr/labels_{sample}.zarr'
     src_images = zarr.open(src_images, mode='r')
@@ -162,8 +165,11 @@ del sample, src_images, src_labels, dst_images, dst_labels, n, T, c, h, w, t
 
 #%% DOWNSAMPLES NO-DESTRUCTION TILES
 
+ratio = 2 # Ratio of no-destruction to destruction tiles
+
+print('Downsamples no-destruction tiles')
 for sample in ['train', 'valid', 'test']:
-    print(f'Processing sample {sample}')
+    print(f' - Processing sample {sample}')
     # Define paths
     images_zarr = f'{paths.data}/{params.city}/zarr/images_{sample}_vitmae.zarr'
     labels_zarr = f'{paths.data}/{params.city}/zarr/labels_{sample}_vitmae.zarr'
@@ -176,7 +182,7 @@ for sample in ['train', 'valid', 'test']:
     untouch = np.where(np.logical_and(~destroy, ~np.isnan(labels.flatten())))[0]
     indices = np.concatenate((
         np.where(destroy)[0],
-        np.random.choice(untouch, np.sum(destroy), replace=False)))
+        np.random.choice(untouch, ratio * np.sum(destroy), replace=False)))
     np.random.shuffle(indices)
     images = images[indices]
     labels = labels[indices]
