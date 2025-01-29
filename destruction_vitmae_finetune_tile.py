@@ -23,9 +23,9 @@ from destruction_utilities import *
 # Utilities
 device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
 params = argparse.Namespace(
-    cities=['aleppo'],
+    cities=['aleppo', 'moschun'],
     batch_size=64,
-    label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
+    label_map={0:0, 1:0, 2:0, 3:1, 255:torch.tensor(float('nan'))})
 
 #%% TRAINING UTILITIES
 
@@ -46,11 +46,12 @@ class ZarrDataset(utils.data.Dataset):
 
 class ZarrDataLoader:
 
-    def __init__(self, datafiles:list, datasets:list, label_map:dict, batch_size:int, preprocessor=None):
+    def __init__(self, datafiles:list, datasets:list, label_map:dict, batch_size:int, preprocessor=None, shuffle:bool=True):
         self.datafiles    = datafiles
         self.datasets     = datasets
         self.label_map    = label_map
         self.batch_size   = batch_size
+        self.shuffle      = shuffle
         self.batch_index  = 0
         self.data_sizes   = np.array([len(dataset) for dataset in datasets])
         self.data_indices = self.compute_data_indices()
@@ -69,10 +70,12 @@ class ZarrDataLoader:
     
     def __iter__(self):
         self.batch_index = 0
-        for city in self.datafiles:
-            print(f'Shuffling {city}', end='\r')
-            shuffle_zarr(self.datafiles[city]['images_zarr'])
-            shuffle_zarr(self.datafiles[city]['labels_zarr'])
+        if self.shuffle:
+            for city in self.datafiles:
+                print(f'Shuffling {city}', end='\r')
+                shuffle_zarr(
+                    images_zarr=self.datafiles[city]['images_zarr'], 
+                    labels_zarr=self.datafiles[city]['labels_zarr'])
         return self
 
     def __next__(self):
@@ -132,17 +135,22 @@ test_datasets   = [ZarrDataset(**test_datafiles[city])  for city in params.citie
 
 # Intialises data loaders
 preprocessor = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
-train_loader = ZarrDataLoader(datafiles=train_datafiles, datasets=train_datasets, batch_size=params.batch_size, label_map=params.label_map, preprocessor=preprocessor)
-valid_loader = ZarrDataLoader(datafiles=valid_datafiles, datasets=valid_datasets, batch_size=params.batch_size, label_map=params.label_map, preprocessor=preprocessor)
-test_loader  = ZarrDataLoader(datafiles=test_datafiles,  datasets=test_datasets,  batch_size=params.batch_size, label_map=params.label_map, preprocessor=preprocessor)
+params = dict(
+    batch_size=params.batch_size, 
+    label_map=params.label_map, 
+    preprocessor=preprocessor, 
+    shuffle=True)
 
-del train_datafiles, valid_datafiles, test_datafiles, train_datasets, valid_datasets, test_datasets
+train_loader = ZarrDataLoader(datafiles=train_datafiles, datasets=train_datasets, **params)
+valid_loader = ZarrDataLoader(datafiles=valid_datafiles, datasets=valid_datasets, **params)
+test_loader  = ZarrDataLoader(datafiles=test_datafiles,  datasets=test_datasets,  **params)
+del train_datafiles, valid_datafiles, test_datafiles, train_datasets, valid_datasets, test_datasets, params
 
 ''' Checks data loaders
 X, Y = next(train_loader)
-X = unprocess_images(X['pixel_values'], preprocessor)
-idx  = np.random.choice(range(len(X)), size=9, replace=False)
-display_sequence(X[idx], Y[idx], grid_size=(3, 3))
+X    = unprocess_images(X['pixel_values'], preprocessor)
+idx  = np.random.choice(range(len(X)), size=25, replace=False)
+display_sequence(X[idx], Y[idx], grid_size=(5, 5))
 del idx, X, Y
 ''' 
 
@@ -171,7 +179,7 @@ model = model.to(device)
 
 del preprocessor, image_encoder, prediction_head
 
-#%% ALIGNS HEAD PARAMETERS
+#%% OPTIMISATION 1: ALIGNS HEAD PARAMETERS
 
 def train(model:nn.Module, train_loader, valid_loader, device:torch.device, criterion, optimiser, model_path:str, n_epochs:int=1, patience:int=1, accumulate:int=1):
     best_loss, counter = torch.tensor(float('inf')), 0
@@ -212,7 +220,7 @@ train(model=model,
 # Clears GPU memory
 empty_cache(device)
 
-#%% FINES TUNES MODEL
+#%% OPTIMISATION 2: FINES TUNES THE ENTIRE MODEL
 
 # Loss and optimiser
 set_trainable(model.image_encoder, True)

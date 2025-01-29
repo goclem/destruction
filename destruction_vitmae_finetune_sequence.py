@@ -47,12 +47,13 @@ class ZarrDataset(utils.data.Dataset):
 
 class ZarrDataLoader:
 
-    def __init__(self, datafiles:list, datasets:list, label_map:dict, batch_size:int, seq_len:int):
+    def __init__(self, datafiles:list, datasets:list, label_map:dict, batch_size:int, seq_len:int, shuffle:bool=True):
         self.datafiles    = datafiles
         self.datasets     = datasets
         self.label_map    = label_map
         self.batch_size   = batch_size
         self.seq_len      = seq_len
+        self.shuffle      = shuffle
         self.batch_index  = 0
         self.data_sizes   = np.array([len(dataset) for dataset in datasets])
         self.data_indices = self.compute_data_indices()
@@ -83,10 +84,12 @@ class ZarrDataLoader:
     
     def __iter__(self):
         self.batch_index = 0
-        for city in self.datafiles:
-            print(f'Shuffling {city}', end='\r')
-            shuffle_zarr(self.datafiles[city]['images_zarr'])
-            shuffle_zarr(self.datafiles[city]['labels_zarr'])
+        if self.shuffle:
+            for city in self.datafiles:
+                print(f'Shuffling {city}', end='\r')
+                shuffle_zarr(
+                    images_zarr=self.datafiles[city]['images_zarr'], 
+                    labels_zarr=self.datafiles[city]['labels_zarr'])
         return self
 
     def __next__(self):
@@ -145,10 +148,10 @@ train_datasets  = [ZarrDataset(**train_datafiles[city]) for city in params.citie
 valid_datasets  = [ZarrDataset(**valid_datafiles[city]) for city in params.cities]
 test_datasets   = [ZarrDataset(**test_datafiles[city])  for city in params.cities]
 
-# Intialises data loaders
-train_loader = ZarrDataLoader(datafiles=train_datafiles, datasets=train_datasets, batch_size=params.batch_size, seq_len=params.seq_len, label_map=params.label_map)
-valid_loader = ZarrDataLoader(datafiles=valid_datafiles, datasets=valid_datasets, batch_size=params.batch_size, seq_len=params.seq_len, label_map=params.label_map)
-test_loader  = ZarrDataLoader(datafiles=test_datafiles,  datasets=test_datasets,  batch_size=params.batch_size, seq_len=params.seq_len, label_map=params.label_map)
+# Intialises data loaders #! No shuffling
+train_loader = ZarrDataLoader(datafiles=train_datafiles, datasets=train_datasets, batch_size=params.batch_size, seq_len=params.seq_len, label_map=params.label_map, shuffle=False)
+valid_loader = ZarrDataLoader(datafiles=valid_datafiles, datasets=valid_datasets, batch_size=params.batch_size, seq_len=params.seq_len, label_map=params.label_map, shuffle=False)
+test_loader  = ZarrDataLoader(datafiles=test_datafiles,  datasets=test_datasets,  batch_size=params.batch_size, seq_len=params.seq_len, label_map=params.label_map, shuffle=False)
 
 del train_datafiles, valid_datafiles, test_datafiles, train_datasets, valid_datasets, test_datasets
 

@@ -84,7 +84,7 @@ for date in dates:
     write_raster(array=subset, profile=profile, destination=f'{paths.data}/{params.city}/labels/label_{date}.tif')
 del dates, date, subset
 
-#%% CREATES DATASETS FOR DESTRUCTION MODEL
+#%% CREATES THE SEQUENCES DATASETS
 
 #! Removes existing zarr
 reset_folder(f'{paths.data}/{params.city}/zarr', remove=True)
@@ -96,7 +96,7 @@ samples = search_data(f'{params.city}_samples.tif$')
 samples = load_sequences(samples, tile_size=1).squeeze()
 
 # Writes zarr arrays
-print('Writes Zarr arrays')
+print('Creates the sequences datasets')
 for i, (image, label) in enumerate(zip(images, labels)):
     print(f'Processing period {i+1:02d}/{len(images)}')
     # Loads images and labels
@@ -132,9 +132,9 @@ for sample in ['train', 'valid', 'test']:
     indices = np.concatenate((
         np.where(destroy)[0],
         np.random.choice(untouch, np.sum(destroy), replace=False)))
+    np.random.shuffle(indices)
     images = images[indices]
     labels = labels[indices]
-    np.random.shuffle(indices)
     # Writes data
     dataset = zarr.open(images_zarr, shape=images.shape, dtype=images.dtype, mode='w')
     dataset[:] = images
@@ -143,9 +143,9 @@ for sample in ['train', 'valid', 'test']:
 
 del sample, images_zarr, labels_zarr, images, labels, destroy, untouch, indices, dataset
 
-#%% RESHAPES ZARR DATASETS FOR THE VITMAE MODEL
+#%% RESHAPES THE SEQUENCES DATASET INTO THE TILES DATASET
 
-print('Reshapes Zarr datasets for the VITMAE model')
+print('Reshapes the sequences dataset into the tiles dataset')
 for sample in ['train', 'valid', 'test']:
     print(f' - Processing sample {sample}')
     src_images = f'{paths.data}/{params.city}/zarr/images_{sample}.zarr'
@@ -165,7 +165,7 @@ del sample, src_images, src_labels, dst_images, dst_labels, n, T, c, h, w, t
 
 #%% DOWNSAMPLES NO-DESTRUCTION TILES
 
-ratio = 2 # Ratio of no-destruction to destruction tiles
+ratio = 1 # Ratio of no-destruction to destruction tiles
 
 print('Downsamples no-destruction tiles')
 for sample in ['train', 'valid', 'test']:

@@ -283,7 +283,7 @@ def optimise(model:nn.Module, train_loader, device:torch.device, criterion, opti
         accuracy.update(Y[subset], Yh[subset] > .5)
         auroc.update(Y[subset], Yh[subset])
         # Print statistics
-        print(f'{'Training': <10} | Batch {i+1:03d}/{len(train_loader):03d} | Accuracy {accuracy.compute().item():.4f} | Auroc {auroc.compute().item():.4f}', end='\r' if i+1 < len(train_loader) else '\n')
+        print(f'{'Training': <10} | Batch {i+1:03d}/{len(train_loader):03d} | Loss {(run_loss / n_obs):.4f} | Accuracy {accuracy.compute().item():.4f} | Auroc {auroc.compute().item():.4f}', end='\r' if i+1 < len(train_loader) else '\n')
     return run_loss / n_obs
 
 def validate(model:nn.Module, loader, device:torch.device, criterion, threshold:float=0.5) -> torch.Tensor:
@@ -304,7 +304,7 @@ def validate(model:nn.Module, loader, device:torch.device, criterion, threshold:
             accuracy.update(Y[subset], Yh[subset] > .5)
             auroc.update(Y[subset], Yh[subset])
             # Print statistics
-            print(f'{'Validation': <10} | Batch {i+1:03d}/{len(loader):03d} | Accuracy {accuracy.compute().item():.4f} | Auroc {auroc.compute().item():.4f}', end='\r' if i+1 < len(loader) else '\n')
+            print(f'{'Validation': <10} | Batch {i+1:03d}/{len(loader):03d} | Loss {(run_loss / n_obs):.4f} | Accuracy {accuracy.compute().item():.4f} | Auroc {auroc.compute().item():.4f}', end='\r' if i+1 < len(loader) else '\n')
         return run_loss / n_obs
 
 def predict(model:nn.Module, loader, device:torch.device, n_batches:int=None) -> tuple:
