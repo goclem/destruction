@@ -39,17 +39,18 @@ class ZarrDataset(utils.data.Dataset):
 
 class ZarrDataLoader:
 
-    def __init__(self, datafiles:list, datasets:list, batch_size:int, preprocessor=None):
+    def __init__(self, datafiles:list, datasets:list, batch_size:int, preprocessor=None, shuffle:bool=True):
         self.datafiles    = datafiles
         self.datasets     = datasets
         self.batch_size   = batch_size
+        self.shuffle      = shuffle
         self.batch_index  = 0
         self.data_sizes   = np.array([len(dataset) for dataset in datasets])
         self.data_indices = self.compute_data_indices()
         self.preprocessor = preprocessor
 
     def compute_data_indices(self):
-        slice_sizes  = np.cbrt(self.data_sizes) #! Large impact
+        slice_sizes  = np.cbrt(self.data_sizes)
         slice_sizes  = np.divide(slice_sizes, slice_sizes.sum())
         slice_sizes  = np.random.multinomial(self.batch_size, slice_sizes, size=int(np.max(self.data_sizes / self.batch_size)))
         data_indices = np.vstack((np.zeros(len(self.data_sizes), dtype=int), np.cumsum(slice_sizes, axis=0)))
@@ -61,9 +62,10 @@ class ZarrDataLoader:
     
     def __iter__(self):
         self.batch_index = 0
-        for datafile in self.datafiles:
-            print(f'Shuffling {datafile}')
-            shuffle_zarr(datafile)
+        if self.shuffle:
+            for city in self.datafiles:
+                print(f'Shuffling {city}', end='\r')
+                shuffle_zarr(city)
         return self
 
     def __next__(self):
@@ -96,9 +98,9 @@ class ZarrTrainer(transformers.Trainer):
 #%% INITIALISES DATA LOADERS
 
 # Initialises datasets
-train_datafiles = [f'{paths.data}/{city}/zarr/images_train_vitmae.zarr' for city in params.cities]
-valid_datafiles = [f'{paths.data}/{city}/zarr/images_valid_vitmae.zarr' for city in params.cities]
-test_datafiles  = [f'{paths.data}/{city}/zarr/images_test_vitmae.zarr'  for city in params.cities]
+train_datafiles = [f'{paths.data}/{city}/zarr/images_tile_train.zarr' for city in params.cities]
+valid_datafiles = [f'{paths.data}/{city}/zarr/images_tile_valid.zarr' for city in params.cities]
+test_datafiles  = [f'{paths.data}/{city}/zarr/images_tile_test.zarr'  for city in params.cities]
 train_datasets  = [ZarrDataset(datafile) for datafile in train_datafiles]
 valid_datasets  = [ZarrDataset(datafile) for datafile in valid_datafiles]
 test_datasets   = [ZarrDataset(datafile) for datafile in test_datafiles]

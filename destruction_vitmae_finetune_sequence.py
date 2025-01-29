@@ -110,8 +110,7 @@ class ZarrDataLoader:
                 X[i], Y[i] = self.crop_sequence(x=X[i], y=Y[i], seq_len=self.seq_len)
             elif X[i].size(1) < self.seq_len:
                 X[i], Y[i] = self.pad_sequence(x=X[i], y=Y[i], seq_len=self.seq_len)
-        X = torch.cat(X)
-        Y = torch.cat(Y)
+        X, Y = torch.cat(X), torch.cat(Y)
         # Remaps labels
         for key, value in self.label_map.items():
             Y = torch.where(Y == key, value, Y)    
@@ -141,17 +140,22 @@ class BceLoss(nn.Module):
 #%% INITIALISES DATA LOADERS
 
 # Initialises datasets
-train_datafiles = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_train.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_train.zarr') for city in params.cities]))
-valid_datafiles = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_valid.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_valid.zarr') for city in params.cities]))
-test_datafiles  = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_test.zarr',  labels_zarr=f'{paths.data}/{city}/zarr/labels_test.zarr')  for city in params.cities]))
+train_datafiles = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_sequence_train_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_sequence_train_balanced.zarr') for city in params.cities]))
+valid_datafiles = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_sequence_valid_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_sequence_valid_balanced.zarr') for city in params.cities]))
+test_datafiles  = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_sequence_test_balanced.zarr',  labels_zarr=f'{paths.data}/{city}/zarr/labels_sequence_test_balanced.zarr')  for city in params.cities]))
 train_datasets  = [ZarrDataset(**train_datafiles[city]) for city in params.cities]
 valid_datasets  = [ZarrDataset(**valid_datafiles[city]) for city in params.cities]
 test_datasets   = [ZarrDataset(**test_datafiles[city])  for city in params.cities]
 
-# Intialises data loaders #! No shuffling
-train_loader = ZarrDataLoader(datafiles=train_datafiles, datasets=train_datasets, batch_size=params.batch_size, seq_len=params.seq_len, label_map=params.label_map, shuffle=False)
-valid_loader = ZarrDataLoader(datafiles=valid_datafiles, datasets=valid_datasets, batch_size=params.batch_size, seq_len=params.seq_len, label_map=params.label_map, shuffle=False)
-test_loader  = ZarrDataLoader(datafiles=test_datafiles,  datasets=test_datasets,  batch_size=params.batch_size, seq_len=params.seq_len, label_map=params.label_map, shuffle=False)
+# Intialises data loaders
+params = dict(
+    batch_size=params.batch_size, 
+    label_map=params.label_map,
+    shuffle=True)
+
+train_loader = ZarrDataLoader(datafiles=train_datafiles, datasets=train_datasets, **params)
+valid_loader = ZarrDataLoader(datafiles=valid_datafiles, datasets=valid_datasets, **params)
+test_loader  = ZarrDataLoader(datafiles=test_datafiles,  datasets=test_datasets,  **params)
 
 del train_datafiles, valid_datafiles, test_datafiles, train_datasets, valid_datasets, test_datasets
 
@@ -159,7 +163,7 @@ del train_datafiles, valid_datafiles, test_datafiles, train_datasets, valid_data
 X, Y = next(train_loader)
 for i in range(5):
     display_sequence(X[i], Y[i], grid_size=(4, 5))
-del X, Y
+del X, Y, i
 ''' 
 
 #%% INITIALISES MODEL
@@ -199,7 +203,7 @@ count_parameters(model)
 
 del preprocessor, image_encoder, sequence_encoder, prediction_head
 
-#%% ALIGNING PARAMETERS
+#%% OPTIMISATION 1: OPTIMISE SEQUENCE ENCODER AND REGRESSION HEAD
 
 def train(model:nn.Module, train_loader, valid_loader, device:torch.device, criterion, optimiser, model_path:str, n_epochs:int=1, patience:int=1, accumulate:int=1):
     best_loss, counter = torch.tensor(float('inf')), 0
@@ -220,10 +224,13 @@ def train(model:nn.Module, train_loader, valid_loader, device:torch.device, crit
 
 # Freezes image encoder's parameters
 set_trainable(model.image_encoder, False)
+set_trainable(model.sequence_encoder, True)
+set_trainable(model.prediction_head, True)
 count_parameters(model)
 
-optimiser = optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
+# Initialises optimiser and criterion
 criterion = BceLoss(focal=True, drop_nan=True, alpha=0.25, gamma=2.0)
+optimiser = optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
 
 # Training
 train(model=model, 
@@ -240,14 +247,17 @@ train(model=model,
 # Clears GPU memory
 empty_cache(device)
 
-#%% FINE TUNES MODEL
+#%% OPTIMISATION 2: FINES TUNES THE ENTIRE MODEL
 
 # Unfreezes image encoder's parameters
 set_trainable(model.image_encoder, True)
+set_trainable(model.sequence_encoder, True)
+set_trainable(model.prediction_head, True)
 count_parameters(model)
 
-optimiser = optim.AdamW(model.parameters(), lr=1e-5, betas=(0.9, 0.999))
+# Initialises optimiser and criterion
 criterion = BceLoss(focal=True, drop_nan=True, alpha=0.25, gamma=2.0)
+optimiser = optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
 
 # Training
 train(model=model, 

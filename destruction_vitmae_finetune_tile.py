@@ -25,7 +25,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.ba
 params = argparse.Namespace(
     cities=['aleppo', 'moschun'],
     batch_size=64,
-    label_map={0:0, 1:0, 2:0, 3:1, 255:torch.tensor(float('nan'))})
+    label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
 
 #%% TRAINING UTILITIES
 
@@ -46,7 +46,7 @@ class ZarrDataset(utils.data.Dataset):
 
 class ZarrDataLoader:
 
-    def __init__(self, datafiles:list, datasets:list, label_map:dict, batch_size:int, preprocessor=None, shuffle:bool=True):
+    def __init__(self, datafiles:list, datasets:list, label_map:dict, batch_size:int, shuffle:bool=True):
         self.datafiles    = datafiles
         self.datasets     = datasets
         self.label_map    = label_map
@@ -55,7 +55,6 @@ class ZarrDataLoader:
         self.batch_index  = 0
         self.data_sizes   = np.array([len(dataset) for dataset in datasets])
         self.data_indices = self.compute_data_indices()
-        self.preprocessor = preprocessor
 
     def compute_data_indices(self):
         slice_sizes  = np.cbrt(self.data_sizes)
@@ -81,6 +80,7 @@ class ZarrDataLoader:
     def __next__(self):
         if self.batch_index == len(self):
             raise StopIteration 
+        # Loads tiles
         X, Y = list(), list()
         for dataset, indices in zip(self.datasets, self.data_indices.T):
             start = indices[self.batch_index]
@@ -90,10 +90,10 @@ class ZarrDataLoader:
                 X.append(X_ds), 
                 Y.append(Y_ds)
         X, Y = torch.cat(X), torch.cat(Y)
-        if self.preprocessor is not None:
-            X = self.preprocessor(X.moveaxis(1, -1), return_tensors='pt', do_resize=True)
+        # Remaps labels
         for key, value in self.label_map.items():
             Y = torch.where(Y == key, value, Y)
+        # Updates batch index
         self.batch_index += 1
         return X, Y
     
@@ -126,19 +126,17 @@ def unprocess_images(images:torch.Tensor, preprocessor:nn.Module) -> torch.Tenso
 #%% INITIALISES DATA LOADERS
 
 # Initialises datasets
-train_datafiles = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_train_vitmae.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_train_vitmae.zarr') for city in params.cities]))
-valid_datafiles = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_valid_vitmae.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_valid_vitmae.zarr') for city in params.cities]))
-test_datafiles  = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_test_vitmae.zarr',  labels_zarr=f'{paths.data}/{city}/zarr/labels_test_vitmae.zarr')  for city in params.cities]))
+train_datafiles = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_tile_train_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_tile_train_balanced.zarr') for city in params.cities]))
+valid_datafiles = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_tile_valid_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_tile_valid_balanced.zarr') for city in params.cities]))
+test_datafiles  = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_tile_test_balanced.zarr',  labels_zarr=f'{paths.data}/{city}/zarr/labels_tile_test_balanced.zarr')  for city in params.cities]))
 train_datasets  = [ZarrDataset(**train_datafiles[city]) for city in params.cities]
 valid_datasets  = [ZarrDataset(**valid_datafiles[city]) for city in params.cities]
 test_datasets   = [ZarrDataset(**test_datafiles[city])  for city in params.cities]
 
 # Intialises data loaders
-preprocessor = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
 params = dict(
     batch_size=params.batch_size, 
-    label_map=params.label_map, 
-    preprocessor=preprocessor, 
+    label_map=params.label_map,
     shuffle=True)
 
 train_loader = ZarrDataLoader(datafiles=train_datafiles, datasets=train_datasets, **params)
@@ -148,38 +146,41 @@ del train_datafiles, valid_datafiles, test_datafiles, train_datasets, valid_data
 
 ''' Checks data loaders
 X, Y = next(train_loader)
-X    = unprocess_images(X['pixel_values'], preprocessor)
-idx  = np.random.choice(range(len(X)), size=25, replace=False)
+idx = np.random.choice(range(len(X)), size=25, replace=False)
 display_sequence(X[idx], Y[idx], grid_size=(5, 5))
-del idx, X, Y
-''' 
+del X, Y, idx
+'''
 
 #%% INITIALISES MODEL
 
 class ModelWrapper(nn.Module):
-    def __init__(self, image_encoder:nn.Module, prediction_head:nn.Module):
+    def __init__(self, preprocessor:nn.Module, image_encoder:nn.Module, prediction_head:nn.Module):
         super().__init__()
+        self.preprocessor    = preprocessor
         self.image_encoder   = image_encoder
         self.prediction_head = prediction_head
 
     def forward(self, X:torch.Tensor) -> torch.Tensor:
         # Encodes images
+        X = self.preprocessor(X, return_tensors='pt', do_resize=True)
         H = self.image_encoder(**X)
         Y = self.prediction_head(H.last_hidden_state[:, 0, :])
         return Y
 
 # Initialises model components
+preprocessor    = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
 image_config    = transformers.ViTMAEConfig.from_pretrained('../models/checkpoint-9920')
 image_encoder   = transformers.ViTMAEModel.from_pretrained('../models/checkpoint-9920', config=image_config)
 prediction_head = PredictionHead(input_dim=768, output_dim=1)
 
 # Initialises model
-model = ModelWrapper(image_encoder, prediction_head)
+model = ModelWrapper(preprocessor, image_encoder, prediction_head)
 model = model.to(device)
+count_parameters(model)
 
 del preprocessor, image_encoder, prediction_head
 
-#%% OPTIMISATION 1: ALIGNS HEAD PARAMETERS
+#%% OPTIMISATION 1: OPTIMISE REGRESSION HEAD
 
 def train(model:nn.Module, train_loader, valid_loader, device:torch.device, criterion, optimiser, model_path:str, n_epochs:int=1, patience:int=1, accumulate:int=1):
     best_loss, counter = torch.tensor(float('inf')), 0
@@ -198,10 +199,12 @@ def train(model:nn.Module, train_loader, valid_loader, device:torch.device, crit
                 print('- Early stopping')
                 break
 
-# Loss and optimiser
+# Freezes image encoder's parameters
 set_trainable(model.image_encoder, False)
+set_trainable(model.prediction_head, True)
 count_parameters(model)
 
+# Initialises optimiser and criterion
 criterion = BceLoss(focal=True, drop_nan=True, alpha=0.25, gamma=2.0)
 optimiser = optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
 
@@ -222,10 +225,12 @@ empty_cache(device)
 
 #%% OPTIMISATION 2: FINES TUNES THE ENTIRE MODEL
 
-# Loss and optimiser
+# Unfreezes image encoder's parameters
 set_trainable(model.image_encoder, True)
+set_trainable(model.prediction_head, True)
 count_parameters(model)
 
+# Initialises optimiser and criterion
 criterion = BceLoss(focal=True, drop_nan=True, alpha=0.25, gamma=2.0)
 optimiser = optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
 
@@ -243,4 +248,5 @@ train(model=model,
 
 # Clears GPU memory
 empty_cache(device)
+
 #%%
