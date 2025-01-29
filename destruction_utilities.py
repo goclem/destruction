@@ -240,14 +240,12 @@ def count_parameters(model:nn.Module) -> None:
     nontrain  = sum(p.numel() for p in model.parameters() if not p.requires_grad)
     print(f'Trainable parameters: {trainable:,} | Non-trainable parameters: {nontrain:,}')
 
-def set_trainable(model:nn.Module, trainable:bool) -> None:
+def set_trainable(module:nn.Module, trainable:bool|list[bool]) -> None:
     '''Sets the trainable status of a model'''
-    for param in model.parameters():
-        param.requires_grad = trainable
-    if trainable:
-        model.train()
-    else:
-        model.eval()
+    if isinstance(trainable, bool):
+        trainable = [trainable] * len(list(module.parameters()))
+    for param, status in zip(module.parameters(), trainable):
+        param.requires_grad = status
 
 def empty_cache(device:torch.device) -> None:
     '''Empties the cache of a device'''

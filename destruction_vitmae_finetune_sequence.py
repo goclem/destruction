@@ -192,6 +192,7 @@ class ModelWrapper(nn.Module):
 preprocessor     = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
 image_config     = transformers.ViTMAEConfig.from_pretrained('facebook/vit-mae-base')
 image_encoder    = transformers.ViTMAEModel.from_pretrained('facebook/vit-mae-base', config=image_config)
+status_list      = [param.requires_grad for param in image_encoder.parameters()] # Records the original trainable status of the image encoder's parameters
 sequence_config  = dict(input_dim=768, max_length=23, n_heads=4, hidden_dim=768, n_layers=2, dropout=0.0)
 sequence_encoder = SequenceEncoder(**sequence_config)
 prediction_head  = PredictionHead(input_dim=768, output_dim=1)
@@ -199,7 +200,7 @@ prediction_head  = PredictionHead(input_dim=768, output_dim=1)
 # Initialises model
 model = ModelWrapper(preprocessor, image_encoder, sequence_encoder, prediction_head)
 model = model.to(device)
-count_parameters(model)
+count_parameters(model=model)
 
 del preprocessor, image_encoder, sequence_encoder, prediction_head
 
@@ -223,14 +224,14 @@ def train(model:nn.Module, train_loader, valid_loader, device:torch.device, crit
                 break
 
 # Freezes image encoder's parameters
-set_trainable(model.image_encoder, False)
-set_trainable(model.sequence_encoder, True)
-set_trainable(model.prediction_head, True)
-count_parameters(model)
+set_trainable(module=model.image_encoder, trainable=False)
+set_trainable(module=model.sequence_encoder, trainable=True)
+set_trainable(module=model.prediction_head, trainable=True)
+count_parameters(model=model)
 
 # Initialises optimiser and criterion
 criterion = BceLoss(focal=True, drop_nan=True, alpha=0.25, gamma=2.0)
-optimiser = optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
+optimiser = optim.AdamW(params=model.parameters(), lr=1e-4, betas=(0.9, 0.999))
 
 # Training
 train(model=model, 
@@ -239,25 +240,25 @@ train(model=model,
       device=device,
       criterion=criterion, 
       optimiser=optimiser, 
-      model_path='../models/vitmae_align.pth',
+      model_path='../models/vitmae_sequence_aligned.pth',
       n_epochs=100, 
       patience=3,
       accumulate=4)
 
 # Clears GPU memory
-empty_cache(device)
+empty_cache(device=device)
 
 #%% OPTIMISATION 2: FINES TUNES THE ENTIRE MODEL
 
 # Unfreezes image encoder's parameters
-set_trainable(model.image_encoder, True)
-set_trainable(model.sequence_encoder, True)
-set_trainable(model.prediction_head, True)
-count_parameters(model)
+set_trainable(module=model.image_encoder, trainable=status_list)
+set_trainable(module=model.sequence_encoder, trainable=True)
+set_trainable(module=model.prediction_head, trainable=True)
+count_parameters(model=model)
 
 # Initialises optimiser and criterion
 criterion = BceLoss(focal=True, drop_nan=True, alpha=0.25, gamma=2.0)
-optimiser = optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999))
+optimiser = optim.AdamW(params=model.parameters(), lr=1e-4, betas=(0.9, 0.999))
 
 # Training
 train(model=model, 
@@ -266,12 +267,12 @@ train(model=model,
       device=device, 
       criterion=criterion, 
       optimiser=optimiser,
-      model_path='../models/vitmae_finetune.pth',
+      model_path='../models/vitmae_sequence_finetuned.pth',
       n_epochs=100, 
       patience=3,
       accumulate=4)
 
 # Clears GPU memory
-empty_cache(device)
+empty_cache(device=device)
 
 #%%
