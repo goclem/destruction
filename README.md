@@ -7,83 +7,61 @@
 
 ## Questions
 
-**Data**
+## **General Project Structure**  
 
-- How to aggregate buildings with different levels of destruction on a label tile?
-- Should destruction 1 and 2 be labelled as 0?
-- Should patches overlap for more robust-smooth predictions?
+Our model follows a three-step routine:  
+1. **Pretraining:** Train an encoder-decoder model to reconstruct images (*image → image*).  
+2. **Fine-tuning:** Adapt the encoder to predict destruction labels (*image → destruction label*).  
+3. **Sequence Encoding:** Apply a sequence encoder on top of encoded image sequences (*sequence of images → sequence of labels*).  
 
-**Model**
+---  
 
-- Should the sequence encoder access the post data?
-- Should the ourput layer be an ordinal regression?
+## **Dataloader Workflow**  
 
-**Training**
+1. Compute the probability for each city based on the share of tiles per city.  
+2. Using these probabilities, randomly sample the number of tiles per city and batch, ensuring the total number of tiles matches the batch size.  
+3. Generate a large list of city combinations for multiple batches.  
+4. Define slice indices for each batch.  
+5. Stop when the batch slicing index reaches the tile limit for the first city.  
 
-- Should we fine-tune the image encoder?
-- Should the sequence encoder be trained directly in the embedding space?
+### **Batch Creation & Shuffling**  
+- **Batch Composition:** Assemble batches according to the number of tiles per city from the generated list.  
+- **Shuffling:** Previously, images and labels were shuffled separately. This has now been corrected to ensure proper alignment.  
 
-## Experiments
+---  
 
-Experiments performed on Aleppo
+## **Problem: Accuracy Improves, but AUC Remains at 0.5 (Despite Balanced Samples)**  
 
-**Destruction labels**
+### **Investigation & Findings**  
 
-| Destroyed | Test Accuracy |
-|-----------|---------------|
-| 3         | 83.00         |
-| 2, 3      | 90.18         |
-| 1, 2, 3   | 91.75         |
+#### **Dataset Analysis**  
+- **Resizing issue when reshaping from (n × t × c × h × w) to ((n × t) × c × h × w):** ❌ No problem found.  
+- **Data type issue:** ❌ No problem found.  
+- **Class balance:** Initially, the dataset had a 2:1 ratio instead of being fully balanced.  
+- **Data quality:** Some tiles are assigned a label of 1 in ways that are difficult to interpret. Overall, the dataset is not very clean.  
 
-**Subsamples**
+#### **Routine Step 1: Pretraining**  
+- **Encoder-decoder performance:** The decoded images roughly resemble the original images, indicating the encoder is functioning as expected.  
 
-- Keeping the sequences with some destruction &rarr; 0.95 test accuracy
-- Does not generalise to full sample
+#### **Routine Step 2: Fine-tuning for Destruction Prediction**  
+- **Dataloader loading only 0s or 1s?** ❌ No, both labels (0 and 1) are present.  
+- **Shuffling issue?** ❌ No, originally, images and labels were shuffled separately, but this has been corrected.  
+- **Model predicting only 0s or 1s?** ❌ No, the model predicts values around 0.4 but varies across different tiles.  
+- **Metric issue?** ❌ No issue detected with the metric calculation.  
 
-**Focal loss**
+### **Root Causes Identified**  
+1. **Shuffling issue:** Previously, images and labels were shuffled separately. This has now been fixed.  
+2. **Frozen encoder weights:** The encoder remained frozen during tile-level classification, preventing feature adaptation for destruction prediction.  
 
-- Focal loss + subsampling &rarr; decision threshold 0.5
+**Note:** Early stopping is currently based on **loss**, not AUC.  
 
-## Proposed changes
+---  
 
-**Model**
+## **Next Steps**  
 
-- PyTorch implementation, more training control
-- Modular architecture with independent components 
-	- Image encoder (n x t x d x h x w &rarr; n x t x k)
-	- Sequence encoder (n x t x k  &rarr; n x t x k)
-	- Classification head (n x t x k &rarr; n x t x 1)
-- Pre-trained foundation model (i.e. SatlasPretrain) as image encoder
-	- Domain transfer for HR aerial images (e.g. trained on snow)
-	- Extract images features at different scales
-	- Decreased computational cost, fine-tuning optionnal
-	- Parametrised dimensionality reduction
-- Transformer as sequence encoder
-	- Processes sequences of varying lengths
-	- Captures temporal dependence between images and labels
-	- Multi-head attention using causal mask
-
-**Optimisation**
-
-- Masked focal cross-entropy 
-	- Training using entire image sequences and the non-missing labels
-	- Manages class imbalances and weights difficult examples
-- Gradient accumulation to stabilise training
-- Model checkpoints to avoid training from scratch
-
-**Data & loaders**
-
-- One zarr file per
-	- City e.g. Aleppo
-	- Sample i.e. train, valid, test
-	- Dataset i.e. images, labels
-- Data loader using multiple city datasets
-- Shuffle training and validation datasets on epoch end
-
-**Predictions**
-
-- Predict using moving windows
-- Estimate the threshold that maximises the F-score
+- **Clement:** Update the dataset to include both balanced and unbalanced versions.  
+- **Dominik:** Implement fine-tuning at the tile level.  
+- **Next Phase:** Once initial results are available, proceed with fine-tuning for sequence classification.
 
 ## Resources
 
