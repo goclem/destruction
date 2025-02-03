@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 '''
-@description: Vision transformer masked auto-encoder
+@description: Pretrains a vision transformer using the masked auto-encoder scheme
 @authors: Clement Gorin, Dominik Wielath
 @contact: clement.gorin@univ-paris1.fr
 '''
@@ -39,20 +39,21 @@ class ZarrDataset(utils.data.Dataset):
 
 class ZarrDataLoader:
 
-    def __init__(self, datafiles:list, datasets:list, batch_size:int, preprocessor=None):
+    def __init__(self, datafiles:list, datasets:list, batch_size:int, preprocessor=None, shuffle:bool=True):
         self.datafiles    = datafiles
         self.datasets     = datasets
         self.batch_size   = batch_size
+        self.shuffle      = shuffle
         self.batch_index  = 0
         self.data_sizes   = np.array([len(dataset) for dataset in datasets])
         self.data_indices = self.compute_data_indices()
         self.preprocessor = preprocessor
 
     def compute_data_indices(self):
-        slice_sizes  = np.cbrt(self.data_sizes) #! Large impact
+        slice_sizes  = np.cbrt(self.data_sizes)
         slice_sizes  = np.divide(slice_sizes, slice_sizes.sum())
         slice_sizes  = np.random.multinomial(self.batch_size, slice_sizes, size=int(np.max(self.data_sizes / self.batch_size)))
-        data_indices = np.row_stack((np.zeros(len(self.data_sizes), dtype=int), np.cumsum(slice_sizes, axis=0)))
+        data_indices = np.vstack((np.zeros(len(self.data_sizes), dtype=int), np.cumsum(slice_sizes, axis=0)))
         data_indices = data_indices[np.all(data_indices < self.data_sizes, axis=1)]
         return data_indices
 
@@ -61,9 +62,10 @@ class ZarrDataLoader:
     
     def __iter__(self):
         self.batch_index = 0
-        for datafile in self.datafiles:
-            print(f'Shuffling {datafile}')
-            shuffle_zarr(datafile)
+        if self.shuffle:
+            for city in self.datafiles:
+                print(f'Shuffling {city}', end='\r')
+                shuffle_zarr(city)
         return self
 
     def __next__(self):
@@ -77,7 +79,7 @@ class ZarrDataLoader:
         X = torch.cat(X)
         if self.preprocessor is not None:
             X = self.preprocessor(X.moveaxis(1, -1), return_tensors='pt', do_resize=True)
-        self.batch_index += 1 
+        self.batch_index += 1
         return X
 
 class ZarrTrainer(transformers.Trainer):
@@ -96,10 +98,9 @@ class ZarrTrainer(transformers.Trainer):
 #%% INITIALISES DATA LOADERS
 
 # Initialises datasets
-train_datafiles = [f'{paths.data}/{city}/zarr/images_train_vitmae.zarr' for city in params.cities]
-valid_datafiles = [f'{paths.data}/{city}/zarr/images_valid_vitmae.zarr' for city in params.cities]
-test_datafiles  = [f'{paths.data}/{city}/zarr/images_test_vitmae.zarr'  for city in params.cities]
-
+train_datafiles = [f'{paths.data}/{city}/zarr/images_tile_train.zarr' for city in params.cities]
+valid_datafiles = [f'{paths.data}/{city}/zarr/images_tile_valid.zarr' for city in params.cities]
+test_datafiles  = [f'{paths.data}/{city}/zarr/images_tile_test.zarr'  for city in params.cities]
 train_datasets  = [ZarrDataset(datafile) for datafile in train_datafiles]
 valid_datasets  = [ZarrDataset(datafile) for datafile in valid_datafiles]
 test_datasets   = [ZarrDataset(datafile) for datafile in test_datafiles]
@@ -113,15 +114,24 @@ test_loader  = ZarrDataLoader(datafiles=test_datafiles,  datasets=test_datasets,
 # X = next(test_loader) # Checks data loader
 del train_datafiles, valid_datafiles, test_datafiles, train_datasets, valid_datasets, test_datasets
 
+# Prints data loader information
+print(f'Number of batches per epoch:\n - Train {len(train_loader)}\n - Valid {len(valid_loader)}\n - Test  {len(test_loader)}')
+
+print(f'Shares of training tiles per epoch:')
+train_shares = dict(zip(params.cities, (train_loader.data_indices[-1] / train_loader.data_sizes).tolist()))
+for city, share in train_shares.items():
+    print(f' - {city:<8} {share:.04f}')
+
 #%% FINE-TUNES VITMAE
 
 # Loads pre-trained model
-model = transformers.ViTMAEForPreTraining.from_pretrained('facebook/vit-mae-base')
+config = transformers.ViTMAEConfig.from_pretrained('facebook/vit-mae-base')
+config.mask_ratio = 0.75
+model = transformers.ViTMAEForPreTraining.from_pretrained('facebook/vit-mae-base', config=config)
 model = model.to(device)
 
 # Training
 training_args = transformers.TrainingArguments(
-    output_dir='../models',
     num_train_epochs=100,
     per_device_train_batch_size=params.batch_size,
     per_device_eval_batch_size=params.batch_size,
@@ -129,18 +139,19 @@ training_args = transformers.TrainingArguments(
     weight_decay=0.01,
     lr_scheduler_type='linear',
     warmup_steps=100,
-    save_strategy='epoch',
+    output_dir='../models/vitmae',
     eval_strategy='epoch',
-    load_best_model_at_end=True,
-    metric_for_best_model='eval_runtime',
-    logging_strategy='no'
+    evaluation_strategy='epoch',
+    logging_dir='../models/vitmae_logs',
+    logging_strategy='epoch'
 )
 
 trainer = ZarrTrainer(
     model=model,
     args=training_args,
     train_dataloader=train_loader,
-    eval_dataloader=valid_loader
+    eval_dataloader=valid_loader,
+    eval_dataset=utils.data.Dataset() # Dummy dataset to fix the transformers.Trainer bug
 )
 
 history = trainer.train()
@@ -150,6 +161,7 @@ empty_cache(device)
 
 #%% CHECKS RECONSTRUCTIONS
 
+'''
 def unprocess_images(images:torch.Tensor, preprocessor:nn.Module) -> torch.Tensor:
     means  = torch.Tensor(preprocessor.image_mean).view(3, 1, 1)
     stds   = torch.Tensor(preprocessor.image_std).view(3, 1, 1)
@@ -158,7 +170,7 @@ def unprocess_images(images:torch.Tensor, preprocessor:nn.Module) -> torch.Tenso
     return images
 
 # Predicts images
-images = next(iter(test_loader)).pixel_values
+images = next(test_loader).pixel_values
 with torch.no_grad():
     outputs = model(images.to(device))
 
@@ -182,5 +194,6 @@ for i in torch.randperm(figdata.shape[0])[:10]:
         ax.set_title(title, fontsize=15)
         ax.set_axis_off()
     plt.show()
+'''
 
 #%%

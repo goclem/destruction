@@ -31,8 +31,7 @@ from torcheval import metrics
 
 home  = os.path.expanduser('~')
 paths = argparse.Namespace(
-    data='/lustre/ific.uv.es/ml/iae091/data', # Artemisa
-    #data = '../data', # local Dominik
+    data='../data',
     models='../models',
     figures='../figures',
     desktop=os.path.join(home, 'Desktop'),
@@ -241,14 +240,12 @@ def count_parameters(model:nn.Module) -> None:
     nontrain  = sum(p.numel() for p in model.parameters() if not p.requires_grad)
     print(f'Trainable parameters: {trainable:,} | Non-trainable parameters: {nontrain:,}')
 
-def set_trainable(model:nn.Module, trainable:bool) -> None:
+def set_trainable(module:nn.Module, trainable:bool|list[bool]) -> None:
     '''Sets the trainable status of a model'''
-    for param in model.parameters():
-        param.requires_grad = trainable
-    if trainable:
-        model.train()
-    else:
-        model.eval()
+    if isinstance(trainable, bool):
+        trainable = [trainable] * len(list(module.parameters()))
+    for param, status in zip(module.parameters(), trainable):
+        param.requires_grad = status
 
 def empty_cache(device:torch.device) -> None:
     '''Empties the cache of a device'''
@@ -257,21 +254,21 @@ def empty_cache(device:torch.device) -> None:
     if device == 'mps':
         torch.mps.empty_cache()
 
-def optimise(model:nn.Module, loader, device:torch.device, criterion, optimiser, accumulate:int=1) -> torch.Tensor:
+def optimise(model:nn.Module, train_loader, device:torch.device, criterion, optimiser, accumulate:int=1) -> torch.Tensor:
     '''Optimises a model using a training sample for one epoch'''
     model.train()
     accuracy = metrics.BinaryAccuracy(device='cpu')
     auroc    = metrics.BinaryAUROC(device='cpu')
     run_loss, n_obs = 0.0, 0
-    for i, (X, Y) in enumerate(loader):
+    for i, (X, Y) in enumerate(train_loader):
         # Optimisation
         optimiser.zero_grad()
         X, Y = X.to(device), Y.to(device)
-        Yh = model(X)
+        Yh   = model(X)
         loss = criterion(Yh, Y)
         loss.backward()
         # Gradient accumulation
-        if ((i + 1) % accumulate == 0) or (i + 1 == len(loader)):
+        if ((i + 1) % accumulate == 0) or (i + 1 == len(train_loader)):
             optimiser.step()
         else:
             for param in model.parameters():
@@ -284,7 +281,7 @@ def optimise(model:nn.Module, loader, device:torch.device, criterion, optimiser,
         accuracy.update(Y[subset], Yh[subset] > .5)
         auroc.update(Y[subset], Yh[subset])
         # Print statistics
-        print(f"{'Training': <10} | Batch {i+1:03d}/{len(loader):03d} | Accuracy {accuracy.compute().item():.4f} | Auroc {auroc.compute().item():.4f}", end='\r' if i+1 < len(loader) else '\n')
+        print(f"{'Training': <10} | Batch {i+1:03d}/{len(train_loader):03d} | Loss {(run_loss / n_obs):.4f} | Accuracy {accuracy.compute().item():.4f} | Auroc {auroc.compute().item():.4f}", end='\r' if i+1 < len(train_loader) else '\n')
     return run_loss / n_obs
 
 def validate(model:nn.Module, loader, device:torch.device, criterion, threshold:float=0.5) -> torch.Tensor:
@@ -305,7 +302,7 @@ def validate(model:nn.Module, loader, device:torch.device, criterion, threshold:
             accuracy.update(Y[subset], Yh[subset] > .5)
             auroc.update(Y[subset], Yh[subset])
             # Print statistics
-            print(f"{'Validation': <10} | Batch {i+1:03d}/{len(loader):03d} | Accuracy {accuracy.compute().item():.4f} | Auroc {auroc.compute().item():.4f}", end='\r' if i+1 < len(loader) else '\n')
+            print(f"{'Validation': <10} | Batch {i+1:03d}/{len(loader):03d} | Loss {(run_loss / n_obs):.4f} | Accuracy {accuracy.compute().item():.4f} | Auroc {auroc.compute().item():.4f}", end='\r' if i+1 < len(loader) else '\n')
         return run_loss / n_obs
 
 def predict(model:nn.Module, loader, device:torch.device, n_batches:int=None) -> tuple:

@@ -1,6 +1,6 @@
 universe = vanilla
-executable              = destruction_optimise.sh
-# arguments               = 
+executable              = data_preprocessing.sh
+# arguments               = /lustre/ific.uv.es/ml/iae091/data
 log                     = condor_logs/logfile.$(Cluster).$(Process).log
 output                  = condor_logs/outfile.$(Cluster).$(Process).out
 error                   = condor_logs/errors.$(Cluster).$(Process).err
@@ -8,7 +8,6 @@ error                   = condor_logs/errors.$(Cluster).$(Process).err
 # Needed to read .bashrc and conda environment
 getenv = True
 
-request_gpus = 1
 # TestJob CPU
-# +testJob = True
++testJob = True
 queue
