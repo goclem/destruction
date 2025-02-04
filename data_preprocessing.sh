@@ -6,8 +6,8 @@
 # Date: 2024-05-01
 # Version: 1.0
 
-#declare -a Cities=("hostomel" "irpin" "livoberezhnyi" "moschun" "volnovakha" "aleppo" "damascus" "daraa" "deirezzor" "hama" "homs" "idlib" "raqqa")
-declare -a Cities=("aleppo" "damascus" "daraa" "deirezzor" "hama" "homs" "idlib" "raqqa")
+declare -a Cities=("hostomel" "irpin" "livoberezhnyi" "moschun" "volnovakha" "aleppo" "damascus" "daraa" "deirezzor" "hama" "homs" "idlib" "raqqa")
+#declare -a Cities=("aleppo" "damascus" "daraa" "deirezzor" "hama" "homs" "idlib" "raqqa")
 
 
 for city in "${Cities[@]}"; do
