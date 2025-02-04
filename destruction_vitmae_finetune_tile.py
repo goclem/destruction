@@ -184,8 +184,8 @@ class ModelWrapper(nn.Module):
 
 # Initialises model components
 preprocessor    = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base', device=device)
-image_config    = transformers.ViTMAEConfig.from_pretrained('../models/checkpoint-9920')
-image_encoder   = transformers.ViTMAEModel.from_pretrained('../models/checkpoint-9920', config=image_config)
+image_config    = transformers.ViTMAEConfig.from_pretrained(f'{paths.models}/checkpoint-9920')
+image_encoder   = transformers.ViTMAEModel.from_pretrained(f'{paths.models}/checkpoint-9920', config=image_config)
 status_list     = [param.requires_grad for param in image_encoder.parameters()] # Records the original trainable status of the image encoder's parameters
 prediction_head = PredictionHead(input_dim=768, output_dim=1)
 count_parameters(image_encoder)
@@ -232,7 +232,7 @@ train(model=model,
       device=device,
       criterion=criterion,
       optimiser=optimiser,
-      model_path='../models/vitmae_tile_aligned.pth',
+      model_path= f'{paths.models}/vitmae_tile_aligned.pth',
       n_epochs=100,
       patience=3,
       accumulate=4)
@@ -258,7 +258,7 @@ train(model=model,
       device=device,
       criterion=criterion, 
       optimiser=optimiser, 
-      model_path='../models/vitmae_tile_finetuned.pth',
+      model_path=f'{paths.models}/vitmae_tile_finetuned.pth',
       n_epochs=100, 
       patience=3,
       accumulate=4)
