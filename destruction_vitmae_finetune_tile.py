@@ -234,7 +234,7 @@ train(model=model,
       optimiser=optimiser,
       model_path= f'{paths.models}/vitmae_tile_aligned.pth',
       n_epochs=100,
-      patience=5,
+      patience=7,
       accumulate=4)
 
 # Clears GPU memory
@@ -260,7 +260,7 @@ train(model=model,
       optimiser=optimiser, 
       model_path=f'{paths.models}/vitmae_tile_finetuned.pth',
       n_epochs=100, 
-      patience=5,
+      patience=7,
       accumulate=4)
 
 # Clears GPU memory
