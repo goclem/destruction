@@ -14,5 +14,5 @@
 
 
 #python3 destruction_vitmae_finetune_tile.py --cities hostomel irpin livoberezhnyi moschun volnovakha aleppo daraa hama homs idlib raqqa
-python3 destruction_vitmae_finetune_tile.py --cities hostomel irpin livoberezhnyi moschun volnovakha aleppo daraa hama idlib raqqa 
+python3 destruction_vitmae_finetune_tile.py --cities hostomel irpin livoberezhnyi moschun volnovakha aleppo daraa hama homs idlib raqqa 
 
