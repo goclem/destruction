@@ -217,7 +217,7 @@ for sample in ['train', 'valid', 'test']:
     
     elif balancing_method == 2:
     # Upsampling destroyed tiles
-        sample_size = max(int(len(untouch) / params.tile_ratio), np.where(destroy)[0])
+        sample_size = max(int(len(untouch) / params.tile_ratio), len(np.where(destroy)[0]))
         indices = np.concatenate((
             untouch,                                                                        # list of undestroyed tiles
             np.random.choice(np.where(destroy)[0], sample_size, replace=True)))           # sample of destroyed of same size
