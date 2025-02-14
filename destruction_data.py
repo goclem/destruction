@@ -32,7 +32,7 @@ params = argparse.Namespace(
     train_size=0.50, valid_size=0.25, test_size=0.25,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))},
     sequence_ratio=1,
-    tile_ratio=1)
+    tile_ratio=4)
 
 #%% COMPUTES SAMPLES
 
@@ -218,7 +218,7 @@ for sample in ['train', 'valid', 'test']:
     # Upsampling destroyed tiles
         indices = np.concatenate((
             untouch,                                                                        # list of undestroyed tiles
-            np.random.choice(np.where(destroy)[0], len(untouch), replace=True)))           # sample of destroyed of same size
+            np.random.choice(np.where(destroy)[0], len(untouch) / params.tile_ratio, replace=True)))           # sample of destroyed of same size
         np.random.shuffle(indices)
         
     print(f"\t - total after rebalancing final: {len(indices)}")
