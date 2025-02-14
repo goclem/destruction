@@ -126,7 +126,7 @@ del images, labels, samples, i, image, label, arrays, sample, value, array, shap
 
 #%% BALANCES THE SEQUENCE DATASET BY DOWNSAMPLING NO-DESTRUCTION SEQUENCES
 
-print('Downsamples no-destruction sequences')
+"""print('Downsamples no-destruction sequences')
 for sample in ['train', 'valid', 'test']:
     print(f' - Processing sample {sample}')
     # Defines datasets paths
@@ -151,7 +151,7 @@ for sample in ['train', 'valid', 'test']:
     dst_images[:] = src_images[indices]
     dst_labels[:] = src_labels[indices]
 
-del sample, src_images, src_labels, dst_images, dst_labels, destroy, untouch, indices
+del sample, src_images, src_labels, dst_images, dst_labels, destroy, untouch, indices"""
 
 #%% RESHAPES THE SEQUENCES DATASET INTO THE TILES DATASET
 
@@ -176,9 +176,16 @@ for sample in ['train', 'valid', 'test']:
 
 del sample, src_images, src_labels, dst_images, dst_labels, n, T, c, h, w, t
 
-#%% BALANCES THE TILE DATASET BY DOWNSAMPLING NO-DESTRUCTION SEQUENCES
+#%% BALANCES THE TILE DATASET BY DOWNSAMPLING NO-DESTRUCTION TILES
 
-print('Downsampling no-destruction tiles')
+balancing_method = 2
+
+balancing_method_dict = {0: "Keep original composition",
+                         1: "Downsampling no-destruction tiles",
+                         2: "Upsampling destruction tiles"}
+
+print(f'Balancing the dataset: {balancing_method_dict[balancing_method]}')
+
 for sample in ['train', 'valid', 'test']:
     print(f' - Processing {sample} sample')
     # Defines datasets paths
@@ -189,14 +196,34 @@ for sample in ['train', 'valid', 'test']:
     # Reads source datasets
     src_images = zarr.open(src_images, mode='r')[:]
     src_labels = zarr.open(src_labels, mode='r')[:]
-    # Subsets datasets
-    destroy = [k for k, v in params.label_map.items() if v == 1]
-    destroy = np.isin(src_labels, destroy).flatten()
-    untouch = np.where(np.logical_and(~destroy, ~np.isnan(src_labels.flatten())))[0]
-    indices = np.concatenate((
-        np.where(destroy)[0],
-        np.random.choice(untouch, params.tile_ratio * np.sum(destroy), replace=False)))
-    np.random.shuffle(indices)
+    
+    # Implement different sampling strategies
+    destroy = [k for k, v in params.label_map.items() if v == 1]                        # list of categories indicating destruction (see label_map)
+    destroy = np.isin(src_labels, destroy).flatten()                                    # list of bools, indicating whether label is destroyed or not-destroyed 
+    untouch = np.where(np.logical_and(~destroy, ~np.isnan(src_labels.flatten())))[0]    # list of undestroyed tiles
+
+    print(f"\t - destruction: {len(np.where(destroy)[0])}, no-destruction: {len(untouch)}, total: {len(src_labels)}")
+    
+    if balancing_method == 0:
+    # Keep original composition
+        indices = range(len(src_labels.flatten()))
+        
+    elif balancing_method == 1:
+    # Downsample undestroyed tiles
+        indices = np.concatenate((
+            np.where(destroy)[0],                                                           # list of destroyed tiles
+            np.random.choice(untouch, params.tile_ratio * np.sum(destroy), replace=False))) # sample of undestroyed of same size
+        np.random.shuffle(indices)
+    
+    elif balancing_method == 2:
+    # Upsampling destroyed tiles
+        indices = np.concatenate((
+            untouch,                                                                        # list of undestroyed tiles
+            np.random.choice(np.where(destroy)[0], len(untouch), replace=True)))           # sample of destroyed of same size
+        np.random.shuffle(indices)
+        
+    print(f"\t - total after rebalancing final: {len(indices)}")
+        
     # Writes data
     dst_images = zarr.open(dst_images, mode='w', shape=(len(indices), *src_images.shape[1:]), dtype=src_images.dtype)
     dst_labels = zarr.open(dst_labels, mode='w', shape=(len(indices), *src_labels.shape[1:]), dtype=src_labels.dtype)
