@@ -31,10 +31,10 @@ from torcheval import metrics
 
 home  = os.path.expanduser('~')
 paths = argparse.Namespace(
-    #data='/lustre/ific.uv.es/ml/iae091/data',
-    #models='/lustre/ific.uv.es/ml/iae091/models',
-    data= "../data",
-    model= "../model",
+    data='/lustre/ific.uv.es/ml/iae091/data',
+    models='/lustre/ific.uv.es/ml/iae091/models',
+    #data= "../data",
+    #model= "../model",
     figures='../figures',
     desktop=os.path.join(home, 'Desktop'),
     temporary=os.path.join(home, 'Desktop', 'temporary')

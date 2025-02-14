@@ -179,7 +179,6 @@ del sample, src_images, src_labels, dst_images, dst_labels, n, T, c, h, w, t
 #%% BALANCES THE TILE DATASET BY DOWNSAMPLING NO-DESTRUCTION TILES
 
 balancing_method = 2
-
 balancing_method_dict = {0: "Keep original composition",
                          1: "Downsampling no-destruction tiles",
                          2: "Upsampling destruction tiles"}
