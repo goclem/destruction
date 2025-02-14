@@ -209,16 +209,18 @@ for sample in ['train', 'valid', 'test']:
         
     elif balancing_method == 1:
     # Downsample undestroyed tiles
+        sample_size = min(params.tile_ratio*sum(destroy),len(untouch))
         indices = np.concatenate((
             np.where(destroy)[0],                                                           # list of destroyed tiles
-            np.random.choice(untouch, params.tile_ratio * np.sum(destroy), replace=False))) # sample of undestroyed of same size
+            np.random.choice(untouch, sample_size, replace=False)))                         # sample of undestroyed of same size
         np.random.shuffle(indices)
     
     elif balancing_method == 2:
     # Upsampling destroyed tiles
+        sample_size = max(int(len(untouch) / params.tile_ratio), np.where(destroy)[0])
         indices = np.concatenate((
             untouch,                                                                        # list of undestroyed tiles
-            np.random.choice(np.where(destroy)[0], len(untouch) / params.tile_ratio, replace=True)))           # sample of destroyed of same size
+            np.random.choice(np.where(destroy)[0], sample_size, replace=True)))           # sample of destroyed of same size
         np.random.shuffle(indices)
         
     print(f"\t - total after rebalancing final: {len(indices)}")
