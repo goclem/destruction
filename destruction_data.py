@@ -30,7 +30,7 @@ params = argparse.Namespace(
     city=args.city, # aleppo
     tile_size=128, 
     train_size=0.50, valid_size=0.25, test_size=0.25,
-    label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))},
+    label_map={0:0, 1:0, 2:0, 3:1, 255:torch.tensor(float('nan'))},
     sequence_ratio=1,
     tile_ratio=4)
 

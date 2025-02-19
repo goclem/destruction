@@ -31,7 +31,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.ba
 parser = argparse.ArgumentParser()
 parser.add_argument('--cities', nargs='+', type=str, default=['aleppo', 'moschun'], help='List of city names')
 parser.add_argument('--batch_size', default=64, help='Batch sizes')
-parser.add_argument('--label_map', default={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))}, help='Label map')
+parser.add_argument('--label_map', default={0:0, 1:0, 2:0, 3:1, 255:torch.tensor(float('nan'))}, help='Label map')
 
 # Parse command-line arguments
 params = parser.parse_args()
