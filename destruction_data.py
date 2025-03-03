@@ -167,6 +167,37 @@ for sample in ['train', 'valid', 'test']:
         dst_images[n*(t-1):t*n,:] = np.concatenate((np.expand_dims(src_images[:,0,:], 1), np.expand_dims(src_images[:,0,:], 1)), axis=1)
         dst_labels[n*(t-1):t*n,:] = src_labels[:,t,:]
 
+del sample, src_images, src_labels, dst_images, dst_labels, n, T, c, h, w, t
+
+#%% BALANCES THE PREPOST DATASET BY DOWNSAMPLING NO-DESTRUCTION PAIRS
+
+print('Downsampling no-destruction prepost')
+for sample in ['train', 'valid', 'test']:
+    print(f' - Processing {sample} sample')
+    # Defines datasets paths
+    src_images = f'{paths.data}/{params.city}/zarr/images_prepost_{sample}.zarr'
+    src_labels = f'{paths.data}/{params.city}/zarr/labels_prepost_{sample}.zarr'
+    dst_images = f'{paths.data}/{params.city}/zarr/images_prepost_{sample}_balanced.zarr'
+    dst_labels = f'{paths.data}/{params.city}/zarr/labels_prepost_{sample}_balanced.zarr'
+    # Reads source datasets
+    src_images = zarr.open(src_images, mode='r')[:]
+    src_labels = zarr.open(src_labels, mode='r')[:]
+    # Subsets datasets
+    destroy = [k for k, v in params.label_map.items() if v == 1]
+    destroy = np.isin(src_labels, destroy).flatten()
+    untouch = np.where(np.logical_and(~destroy, src_labels.flatten() != 255))[0]
+    indices = np.concatenate((
+        np.where(destroy)[0],
+        np.random.choice(untouch, params.tile_ratio * np.sum(destroy), replace=False)))
+    np.random.shuffle(indices)
+    # Writes data
+    dst_images = zarr.open(dst_images, mode='w', shape=(len(indices), *src_images.shape[1:]), dtype=src_images.dtype)
+    dst_labels = zarr.open(dst_labels, mode='w', shape=(len(indices), *src_labels.shape[1:]), dtype=src_labels.dtype)
+    dst_images[:] = src_images[indices]
+    dst_labels[:] = src_labels[indices]
+
+del sample, src_images, src_labels, dst_images, dst_labels, destroy, untouch, indices
+
 #%% RESHAPES THE SEQUENCES DATASET INTO THE TILES DATASET
 
 print('Reshaping the sequences dataset into the tiles dataset')
@@ -206,7 +237,7 @@ for sample in ['train', 'valid', 'test']:
     # Subsets datasets
     destroy = [k for k, v in params.label_map.items() if v == 1]
     destroy = np.isin(src_labels, destroy).flatten()
-    untouch = np.where(np.logical_and(~destroy, ~np.isnan(src_labels.flatten())))[0]
+    untouch = np.where(np.logical_and(~destroy, src_labels.flatten() != 255))[0]
     indices = np.concatenate((
         np.where(destroy)[0],
         np.random.choice(untouch, params.tile_ratio * np.sum(destroy), replace=False)))
