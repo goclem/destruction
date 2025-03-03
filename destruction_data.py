@@ -20,7 +20,7 @@ from destruction_utilities import *
 
 # Utilities
 params = argparse.Namespace(
-    city='aleppo', # aleppo
+    city='moschun', # aleppo
     tile_size=128, 
     train_size=0.50, valid_size=0.25, test_size=0.25,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))},
@@ -146,6 +146,27 @@ for sample in ['train', 'valid', 'test']:
 
 del sample, src_images, src_labels, dst_images, dst_labels, destroy, untouch, indices
 
+#%%  RESHAPES THE SEQUENCES DATASET INTO THE PRE-POST DATASET
+
+print('Reshaping the sequences dataset into the pre-post dataset')
+for sample in ['train', 'valid', 'test']:
+    print(f' - Processing {sample} sample')
+    # Defines datasets paths
+    src_images = f'{paths.data}/{params.city}/zarr/images_sequence_{sample}.zarr'
+    src_labels = f'{paths.data}/{params.city}/zarr/labels_sequence_{sample}.zarr'
+    dst_images = f'{paths.data}/{params.city}/zarr/images_prepost_{sample}.zarr'
+    dst_labels = f'{paths.data}/{params.city}/zarr/labels_prepost_{sample}.zarr'
+    # Reads source datasets
+    src_images = zarr.open(src_images, mode='r')
+    src_labels = zarr.open(src_labels, mode='r')
+    n, T, c, h, w = src_images.shape
+    # Writes destination datasets
+    dst_images = zarr.open(dst_images, mode='w', shape=(n * (T-1), 2, c, h, w), dtype=src_images.dtype)
+    dst_labels = zarr.open(dst_labels, mode='w', shape=(n * (T-1), 1), dtype=src_labels.dtype)
+    for t in np.arange(1, T):
+        dst_images[n*(t-1):t*n,:] = np.concatenate((np.expand_dims(src_images[:,0,:], 1), np.expand_dims(src_images[:,0,:], 1)), axis=1)
+        dst_labels[n*(t-1):t*n,:] = src_labels[:,t,:]
+
 #%% RESHAPES THE SEQUENCES DATASET INTO THE TILES DATASET
 
 print('Reshaping the sequences dataset into the tiles dataset')
@@ -162,10 +183,10 @@ for sample in ['train', 'valid', 'test']:
     n, T, c, h, w = src_images.shape
     # Writes destination datasets
     dst_images = zarr.open(dst_images, mode='w', shape=(n * T, c, h, w), dtype=src_images.dtype)
-    dst_labels = zarr.open(dst_labels, mode='w', shape=(n * T, 1),       dtype=src_labels.dtype)
+    dst_labels = zarr.open(dst_labels, mode='w', shape=(n * T, 1), dtype=src_labels.dtype)
     for t in range(T):
-        dst_images[t*n:(t+1)*n,:] = src_images[:,t,:]
-        dst_labels[t*n:(t+1)*n,:] = src_labels[:,t,:]
+        dst_images[n*t:(t+1)*n,:] = src_images[:,t,:]
+        dst_labels[n*t:(t+1)*n,:] = src_labels[:,t,:]
 
 del sample, src_images, src_labels, dst_images, dst_labels, n, T, c, h, w, t
 
