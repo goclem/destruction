@@ -20,11 +20,12 @@ from destruction_utilities import *
 
 # Utilities
 params = argparse.Namespace(
-    city='moschun', # aleppo
+    city='aleppo', # aleppo
     tile_size=128, 
     train_size=0.50, valid_size=0.25, test_size=0.25,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))},
     sequence_ratio=1,
+    prepost_ratio=1,
     tile_ratio=1)
 
 #%% COMPUTES SAMPLES
@@ -146,7 +147,7 @@ for sample in ['train', 'valid', 'test']:
 
 del sample, src_images, src_labels, dst_images, dst_labels, destroy, untouch, indices
 
-#%%  RESHAPES THE SEQUENCES DATASET INTO THE PRE-POST DATASET
+#%% RESHAPES THE SEQUENCES DATASET INTO THE PRE-POST DATASET
 
 print('Reshaping the sequences dataset into the pre-post dataset')
 for sample in ['train', 'valid', 'test']:
@@ -171,7 +172,7 @@ del sample, src_images, src_labels, dst_images, dst_labels, n, T, c, h, w, t
 
 #%% BALANCES THE PREPOST DATASET BY DOWNSAMPLING NO-DESTRUCTION PAIRS
 
-print('Downsampling no-destruction prepost')
+print('Downsampling no-destruction prepost pairs')
 for sample in ['train', 'valid', 'test']:
     print(f' - Processing {sample} sample')
     # Defines datasets paths
@@ -188,7 +189,7 @@ for sample in ['train', 'valid', 'test']:
     untouch = np.where(np.logical_and(~destroy, src_labels.flatten() != 255))[0]
     indices = np.concatenate((
         np.where(destroy)[0],
-        np.random.choice(untouch, params.tile_ratio * np.sum(destroy), replace=False)))
+        np.random.choice(untouch, params.prepost_ratio * np.sum(destroy), replace=False)))
     np.random.shuffle(indices)
     # Writes data
     dst_images = zarr.open(dst_images, mode='w', shape=(len(indices), *src_images.shape[1:]), dtype=src_images.dtype)
