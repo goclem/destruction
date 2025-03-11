@@ -13,7 +13,6 @@ import accelerate
 import argparse
 import matplotlib.pyplot as plt
 import numpy as np
-import pytorch_lightning as pl
 import transformers
 import torch
 
@@ -24,7 +23,7 @@ from destruction_utilities import *
 # Utilities
 device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
 params = argparse.Namespace(
-    cities=['aleppo', 'moschun'],
+    cities=['moschun'], # ['aleppo', 'moschun'],
     batch_size=64,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
 
@@ -97,25 +96,6 @@ class ZarrDataLoader:
         # Updates batch index
         self.batch_index += 1
         return X, Y
-    
-class BceLoss(nn.Module):
-    '''Binary cross-entropy loss with optional focal loss'''
-    def __init__(self, focal:bool=True, drop_nan:bool=True, alpha:float=0.25, gamma:float=2.0):
-        super().__init__()
-        self.focal    = focal
-        self.drop_nan = drop_nan
-        self.alpha    = alpha
-        self.gamma    = gamma
-
-    def forward(self, inputs:torch.Tensor, targets:torch.Tensor) -> torch.Tensor:
-        subset = torch.ones(targets.size(), dtype=torch.bool)
-        if self.drop_nan:
-            subset = ~torch.isnan(targets)
-        loss = nn.functional.binary_cross_entropy(inputs[subset], targets[subset], reduction='none')
-        if self.focal:
-            loss = self.alpha * (1 - torch.exp(-loss))**self.gamma * loss
-        loss = torch.mean(loss)
-        return loss
 
 def unprocess_images(images:torch.Tensor, preprocessor:nn.Module) -> torch.Tensor:
     means  = torch.Tensor(preprocessor.image_mean).view(3, 1, 1)
@@ -145,71 +125,59 @@ valid_loader = ZarrDataLoader(datafiles=valid_datafiles, datasets=valid_datasets
 test_loader  = ZarrDataLoader(datafiles=test_datafiles,  datasets=test_datasets,  **params)
 del train_datafiles, valid_datafiles, test_datafiles, train_datasets, valid_datasets, test_datasets, params
 
-''' Checks data loaders
+''' Checks data loaders #! Images are duplicated
 X, Y = next(train_loader)
 for idx in np.random.choice(range(len(X)), size=5, replace=False):
     display_sequence(X[idx], [0] + [int(Y[idx])])
-    print(np.equal(X[idx][0], X[idx][1]).all())
 del X, Y, idx
 '''
-
-#! Something odd is that images are duplicated... NEEDS CHECKING
 
 #%% INITIALISES MODEL
 
 class ContrastiveLoss(nn.Module):
     
-    def __init__(self, margin=1.0):
+    def __init__(self, margin:float=1.0):
         super(ContrastiveLoss, self).__init__()
         self.margin = margin 
 
-    def forward(self, output1, output2, label):
-        euclidean_distance = F.pairwise_distance(output1, output2, keepdim=True)
-        loss = (1 - label) * torch.pow(euclidean_distance, 2) + label * torch.pow(torch.clamp(self.margin - euclidean_distance, min=0.0), 2)
+    def forward(self, distance:torch.Tensor, label:torch.Tensor) -> torch.Tensor:
+        loss = (1 - label) * torch.pow(distance, 2) + label * torch.pow(torch.clamp(self.margin - distance, min=0.0), 2)
         return loss.mean()
 
 class SiameseModel(nn.Module):
     
     def __init__(self, preprocessor:nn.Module, image_encoder:nn.Module):
         super().__init__()
-        self.preprocessor     = preprocessor
-        self.image_encoder    = image_encoder
-        self.projection_block = nn.Sequential(
-            nn.Linear(768, 512),
-            nn.ReLU(),
-            nn.Linear(512, 128))
-        self.output_layer = nn.Sequential(
-            nn.Linear(768, 1),
-            nn.Sigmoid()
-        )
+        self.preprocessor  = preprocessor
+        self.image_encoder = image_encoder
+        self.loss_function = ContrastiveLoss(margin=1.0)
 
     def forward_once(self, X:torch.Tensor) -> torch.Tensor:
         H = self.preprocessor(X, return_tensors='pt', do_resize=True).to(device)
         H = self.image_encoder(**H.to(device))
-        H = self.prediction_head(H.last_hidden_state[:, 0, :])
-        H = self.projection_block(H)
+        H = H.last_hidden_state[:, 0, :]
         return H
 
-    def forward(self, X0:torch.Tensor, X1:torch.Tensor) -> torch.Tensor:
+    def forward(self, X0:torch.Tensor, X1:torch.Tensor, Y:torch.Tensor=None) -> torch.Tensor:
         H0 = self.forward_once(X0)
         H1 = self.forward_once(X1)
-        distance = F.pairwise_distance(H0, H1, keepdim=True)
-        return distance
+        D  = F.pairwise_distance(H0, H1, keepdim=True)
+        if Y is not None:
+            loss = self.loss_function(D, Y)
+            return loss
+        return D
 
 # Initialises model components
-preprocessor    = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base', device=device)
-image_config    = transformers.ViTMAEConfig.from_pretrained('../models/checkpoint-9920')
-image_encoder   = transformers.ViTMAEModel.from_pretrained('../models/checkpoint-9920', config=image_config)
-status_list     = [param.requires_grad for param in image_encoder.parameters()] # Records the original trainable status of the image encoder's parameters
-prediction_head = PredictionHead(input_dim=768, output_dim=1)
+preprocessor  = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
+image_encoder = transformers.ViTMAEModel.from_pretrained('../models/checkpoint-9920')
+status_list   = [param.requires_grad for param in image_encoder.parameters()] # Records the original trainable status of the image encoder's parameters
 count_parameters(image_encoder)
 
 # Initialises model
-model = ModelWrapper(preprocessor, image_encoder, prediction_head)
+model = SiameseModel(preprocessor=preprocessor, image_encoder=image_encoder)
 model = model.to(device)
 count_parameters(model=model)
-
-del preprocessor, image_encoder, prediction_head
+del preprocessor, image_encoder
 
 #%% OPTIMISATION 1: OPTIMISE REGRESSION HEAD
 
