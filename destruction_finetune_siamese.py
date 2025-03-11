@@ -13,6 +13,7 @@ import accelerate
 import argparse
 import matplotlib.pyplot as plt
 import numpy as np
+import pytorch_lightning as pl
 import transformers
 import torch
 
@@ -156,18 +157,44 @@ del X, Y, idx
 
 #%% INITIALISES MODEL
 
-class ModelWrapper(nn.Module):
-    def __init__(self, preprocessor:nn.Module, image_encoder:nn.Module, prediction_head:nn.Module):
-        super().__init__()
-        self.preprocessor    = preprocessor
-        self.image_encoder   = image_encoder
-        self.prediction_head = prediction_head
+class ContrastiveLoss(nn.Module):
+    
+    def __init__(self, margin=1.0):
+        super(ContrastiveLoss, self).__init__()
+        self.margin = margin 
 
-    def forward(self, X:torch.Tensor) -> torch.Tensor:
+    def forward(self, output1, output2, label):
+        euclidean_distance = F.pairwise_distance(output1, output2, keepdim=True)
+        loss = (1 - label) * torch.pow(euclidean_distance, 2) + label * torch.pow(torch.clamp(self.margin - euclidean_distance, min=0.0), 2)
+        return loss.mean()
+
+class SiameseModel(nn.Module):
+    
+    def __init__(self, preprocessor:nn.Module, image_encoder:nn.Module):
+        super().__init__()
+        self.preprocessor     = preprocessor
+        self.image_encoder    = image_encoder
+        self.projection_block = nn.Sequential(
+            nn.Linear(768, 512),
+            nn.ReLU(),
+            nn.Linear(512, 128))
+        self.output_layer = nn.Sequential(
+            nn.Linear(768, 1),
+            nn.Sigmoid()
+        )
+
+    def forward_once(self, X:torch.Tensor) -> torch.Tensor:
         H = self.preprocessor(X, return_tensors='pt', do_resize=True).to(device)
         H = self.image_encoder(**H.to(device))
-        Y = self.prediction_head(H.last_hidden_state[:, 0, :])
-        return Y
+        H = self.prediction_head(H.last_hidden_state[:, 0, :])
+        H = self.projection_block(H)
+        return H
+
+    def forward(self, X0:torch.Tensor, X1:torch.Tensor) -> torch.Tensor:
+        H0 = self.forward_once(X0)
+        H1 = self.forward_once(X1)
+        distance = F.pairwise_distance(H0, H1, keepdim=True)
+        return distance
 
 # Initialises model components
 preprocessor    = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base', device=device)
