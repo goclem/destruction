@@ -20,7 +20,7 @@ from destruction_utilities import *
 
 # Parameters
 params = argparse.Namespace(
-    city='aleppo', # moschun
+    city='moschun', #  aleppo
     tile_size=128, 
     train_size=0.50, valid_size=0.25, test_size=0.25,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))},
@@ -72,6 +72,11 @@ filling = damage.T.ffill().bfill().T
 defined = damage.T.bfill().ffill().T
 filling[filling != defined] = 255
 
+'''Checks filling
+for i in random.choice(np.arange(damage.shape[0]), 1):
+    print(pd.concat((damage.iloc[i], filling.iloc[i]), axis=1, keys=['damage', 'filling']))
+'''
+
 # Writes damage labels
 damage = gpd.GeoDataFrame(data=filling[dates].astype(int), geometry=geoms)
 
@@ -82,12 +87,7 @@ for date in dates:
     subset = rasterise(source=subset, profile=profile, varname=date)
     write_raster(array=subset, profile=profile, destination=f'{paths.data}/{params.city}/labels/label_{date}.tif')
 
-del damage, geoms, filling, defined, dates, date, subset
-
-'''Checks filling
-for i in random.choice(np.arange(damage.shape[0]), 1):
-    print(pd.concat((damage.iloc[i], filling.iloc[i]), axis=1))
-'''
+del damage, geoms, filling, defined, date, subset
 
 #%% CREATES THE SEQUENCES DATASETS
 
@@ -115,12 +115,13 @@ for t, (image, label) in enumerate(zip(images, labels)):
     for sample, value in dict(train=1, valid=2, test=3).items():
         dst_images = f'{paths.data}/{params.city}/zarr/images_sequence_{sample}.zarr'
         dst_labels = f'{paths.data}/{params.city}/zarr/labels_sequence_{sample}.zarr'
-        dst_images = zarr.open(dst_images, mode='a', shape=(len(samples[samples == value]), len(images), *src_images.shape[1:]), dtype='u1')
-        dst_labels = zarr.open(dst_labels, mode='a', shape=(len(samples[samples == value]), len(images), *src_labels.shape[1:]), dtype='u1')
-        dst_images[:,t] = zarr.array(src_images[samples == value], dtype='u1')
-        dst_labels[:,t] = zarr.array(src_labels[samples == value], dtype='u1')
+        subset     = samples == value
+        dst_images = zarr.open(dst_images, mode='a', shape=(subset.sum(), len(images), *src_images.shape[1:]), dtype='u1')
+        dst_labels = zarr.open(dst_labels, mode='a', shape=(subset.sum(), len(images), *src_labels.shape[1:]), dtype='u1')
+        dst_images[:,t] = zarr.array(src_images[subset], dtype='u1')
+        dst_labels[:,t] = zarr.array(src_labels[subset], dtype='u1')
             
-del images, image, labels, label, samples, sample, src_images, src_labels, dst_images, dst_labels, t, value
+del images, image, labels, label, samples, sample, src_images, src_labels, dst_images, dst_labels, value, subset, t
 
 #%% RESHAPES THE SEQUENCES DATASET INTO THE PRE-POST DATASET
 
@@ -144,7 +145,7 @@ for sample in ['train', 'valid', 'test']:
     idx = 0
     for t_pre in T_pre:
         for t_post in T_post:
-            print(f'   - Writing pairs: Period {t_pre} -> Period {t_post}')
+            print(f'   - Writing ({idx+1}/{len(T_pre)*len(T_post)}) pre {dates[t_pre]} & post {dates[t_post]}')
             dst_images[idx*n:(idx+1)*n,0,:] = src_images[:,t_pre,:]
             dst_images[idx*n:(idx+1)*n,1,:] = src_images[:,t_post,:]
             dst_labels[idx*n:(idx+1)*n,:]   = src_labels[:,t_post,:]

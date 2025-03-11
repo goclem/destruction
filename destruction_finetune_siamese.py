@@ -13,21 +13,25 @@ import accelerate
 import argparse
 import matplotlib.pyplot as plt
 import numpy as np
+import pytorch_lightning as pl
 import transformers
 import torch
+import torchvision
 
-from torch import optim
 from destruction_models import *
 from destruction_utilities import *
+from pytorch_lightning import callbacks, loggers, profilers
+from torch import optim
+from torchmetrics import classification
 
 # Utilities
-device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
+device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
 params = argparse.Namespace(
-    cities=['moschun'], # ['aleppo', 'moschun'],
+    cities=['aleppo'],
     batch_size=64,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
 
-#%% TRAINING UTILITIES
+#%% INITIALISES DATA MODULE
 
 class ZarrDataset(utils.data.Dataset):
 
@@ -97,155 +101,179 @@ class ZarrDataLoader:
         self.batch_index += 1
         return X, Y
 
-def unprocess_images(images:torch.Tensor, preprocessor:nn.Module) -> torch.Tensor:
-    means  = torch.Tensor(preprocessor.image_mean).view(3, 1, 1)
-    stds   = torch.Tensor(preprocessor.image_std).view(3, 1, 1)
-    images = (images * stds + means) * 255
-    images = torch.clip(images, 0, 255).to(torch.uint8)
-    return images
+class ZarrDataModule(pl.LightningDataModule):
+    
+    def __init__(self, train_datafiles:list, valid_datafiles:list, test_datafiles:list, batch_size:int, label_map:dict, shuffle:bool=True) -> None:
+        super().__init__()
+        self.train_datafiles = train_datafiles
+        self.valid_datafiles = valid_datafiles
+        self.test_datafiles = test_datafiles
+        self.batch_size = batch_size
+        self.label_map = label_map
+        self.shuffle = shuffle
+    
+    def setup(self, stage:str=None):
+        self.train_datasets = [ZarrDataset(**train_datafiles[city]) for city in params.cities]
+        self.valid_datasets = [ZarrDataset(**valid_datafiles[city]) for city in params.cities]
+        self.test_datasets  = [ZarrDataset(**test_datafiles[city])  for city in params.cities]
 
-#%% INITIALISES DATA LOADERS
+    def train_dataloader(self):
+        return ZarrDataLoader(datafiles=self.train_datafiles, datasets=self.train_datasets, label_map=self.label_map, batch_size=self.batch_size, shuffle=self.shuffle)
+
+    def val_dataloader(self):
+        return ZarrDataLoader(datafiles=self.valid_datafiles, datasets=self.valid_datasets, label_map=self.label_map, batch_size=self.batch_size, shuffle=self.shuffle)
+
+    def test_dataloader(self):
+        return ZarrDataLoader(datafiles=self.test_datafiles, datasets=self.test_datasets,   label_map=self.label_map, batch_size=self.batch_size, shuffle=self.shuffle)
 
 # Initialises datasets
 train_datafiles = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_train_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_train_balanced.zarr') for city in params.cities]))
 valid_datafiles = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_valid_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_valid_balanced.zarr') for city in params.cities]))
 test_datafiles  = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_test_balanced.zarr',  labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_test_balanced.zarr')  for city in params.cities]))
-train_datasets  = [ZarrDataset(**train_datafiles[city]) for city in params.cities]
-valid_datasets  = [ZarrDataset(**valid_datafiles[city]) for city in params.cities]
-test_datasets   = [ZarrDataset(**test_datafiles[city])  for city in params.cities]
+data_module = ZarrDataModule(train_datafiles=train_datafiles, valid_datafiles=valid_datafiles, test_datafiles=test_datafiles, batch_size=params.batch_size, label_map=params.label_map, shuffle=True)
+del train_datafiles, valid_datafiles, test_datafiles
 
-# Intialises data loaders
-params = dict(
-    batch_size=params.batch_size, 
-    label_map=params.label_map,
-    shuffle=True)
-
-train_loader = ZarrDataLoader(datafiles=train_datafiles, datasets=train_datasets, **params)
-valid_loader = ZarrDataLoader(datafiles=valid_datafiles, datasets=valid_datasets, **params)
-test_loader  = ZarrDataLoader(datafiles=test_datafiles,  datasets=test_datasets,  **params)
-del train_datafiles, valid_datafiles, test_datafiles, train_datasets, valid_datasets, test_datasets, params
-
-''' Checks data loaders #! Images are duplicated
-X, Y = next(train_loader)
+''' Check data module
+data_module.setup()
+X, Y = next(data_module.train_dataloader())
 for idx in np.random.choice(range(len(X)), size=5, replace=False):
     display_sequence(X[idx], [0] + [int(Y[idx])])
 del X, Y, idx
 '''
 
-#%% INITIALISES MODEL
+#%% INITIALISES MODEL MODULE
 
-class ContrastiveLoss(nn.Module):
-    
-    def __init__(self, margin:float=1.0):
-        super(ContrastiveLoss, self).__init__()
-        self.margin = margin 
-
-    def forward(self, distance:torch.Tensor, label:torch.Tensor) -> torch.Tensor:
-        loss = (1 - label) * torch.pow(distance, 2) + label * torch.pow(torch.clamp(self.margin - distance, min=0.0), 2)
-        return loss.mean()
+def contrastive_loss(distance:torch.Tensor, label:torch.Tensor, margin:float=1.0) -> torch.Tensor:
+    loss = (1 - label) * torch.pow(distance, 2) + label * torch.pow(torch.clamp(margin - distance, min=0.0), 2)
+    return loss.mean()
 
 class SiameseModel(nn.Module):
     
-    def __init__(self, preprocessor:nn.Module, image_encoder:nn.Module):
+    def __init__(self, backbone:str):
         super().__init__()
-        self.preprocessor  = preprocessor
-        self.image_encoder = image_encoder
-        self.loss_function = ContrastiveLoss(margin=1.0)
+        self.processor = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
+        self.encoder   = transformers.ViTMAEModel.from_pretrained(backbone)
+        self.output    = nn.Linear(768, 1)
 
-    def forward_once(self, X:torch.Tensor) -> torch.Tensor:
-        H = self.preprocessor(X, return_tensors='pt', do_resize=True).to(device)
+    def forward_branch(self, X:torch.Tensor) -> torch.Tensor:
+        H = self.processor(X, return_tensors='pt', do_resize=True).to(device)
         H = self.image_encoder(**H.to(device))
-        H = H.last_hidden_state[:, 0, :]
+        H = H.last_hidden_state[:,0,:]
         return H
 
     def forward(self, X0:torch.Tensor, X1:torch.Tensor, Y:torch.Tensor=None) -> torch.Tensor:
-        H0 = self.forward_once(X0)
-        H1 = self.forward_once(X1)
+        H0 = self.forward_branch(X0)
+        H1 = self.forward_branch(X1)
         D  = F.pairwise_distance(H0, H1, keepdim=True)
-        if Y is not None:
-            loss = self.loss_function(D, Y)
-            return loss
-        return D
+        Y  = self.output(D)
+        return D, Y
 
-# Initialises model components
-preprocessor  = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
-image_encoder = transformers.ViTMAEModel.from_pretrained('../models/checkpoint-9920')
-status_list   = [param.requires_grad for param in image_encoder.parameters()] # Records the original trainable status of the image encoder's parameters
-count_parameters(image_encoder)
+class SiameseModule(pl.LightningModule):
+    
+    def __init__(self, backbone:str, learning_rate:float=1e-4, weight_decay:float=0.05):
+        
+        super().__init__()
+        self.save_hyperparameters()
+        self.model = SiameseModule(backbone=backbone)
+        self.contrastive_loss = contrastive_loss
+        self.sigmoid_loss = torchvision.ops.sigmoid_focal_loss
+        self.learning_rate = learning_rate
+        self.weight_decay  = weight_decay
+        self.trainable     = None
 
+    def freeze_encoder(self):
+        self.trainable = [param.requires_grad for param in self.model.encoder.parameters()]
+        for param in self.model.encoder.parameters():
+            param.requires_grad = False
+        print('Encoder frozen')
+
+    def unfreeze_encoder(self):
+        for param, status in zip(self.model.encoder.parameters(), self.trainable):
+            param.requires_grad = status
+        self.trainer.strategy.setup_optimizers(self.trainer)
+        print('Encoder unfrozen, optimisers reset')
+
+    def forward(self, X:torch.Tensor) -> torch.Tensor:
+        Y = self.model(X)
+        return Y
+    
+    def training_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
+        X, Y   = batch
+        D, Yh  = self.model(X).squeeze()
+        C_loss = self.contrastive_loss(D, Y, reduction='mean')
+        S_loss = self.sigmoid_loss(Yh, Y, reduction='mean')
+        train_loss = C_loss + S_loss
+        self.log('train_loss', train_loss, prog_bar=True)
+        return train_loss
+    
+    def validation_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
+        X, Y   = batch
+        D, Yh  = self.model(X).squeeze()
+        C_loss = self.contrastive_loss(D, Y, reduction='mean')
+        S_loss = self.sigmoid_loss(Yh, Y, reduction='mean')
+        val_loss = C_loss + S_loss
+        self.log('val_loss', val_loss, prog_bar=True)
+        return val_loss
+    
+    def test_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
+        X, Y   = batch
+        D, Yh  = self.model(X).squeeze()
+        C_loss = self.contrastive_loss(D, Y, reduction='mean')
+        S_loss = self.sigmoid_loss(Yh, Y, reduction='mean')
+        test_loss = C_loss + S_loss
+        self.log('test_loss', test_loss, prog_bar=True)
+        return test_loss
+
+    def configure_optimizers(self) -> dict:
+        optimizer = optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
+        return {'optimizer':optimizer}
+    
 # Initialises model
-model = SiameseModel(preprocessor=preprocessor, image_encoder=image_encoder)
-model = model.to(device)
-count_parameters(model=model)
-del preprocessor, image_encoder
+model_module = SiameseModule(backbone=f'{paths.models}/checkpoint-9920')
+model_module.freeze_encoder()
+model_name = 'destruction_finetune_siamese'
 
-#%% OPTIMISATION 1: OPTIMISE REGRESSION HEAD
+#%% TRAINS MODEL
 
-def train(model:nn.Module, train_loader, valid_loader, device:torch.device, criterion, optimiser, model_path:str, n_epochs:int=1, patience:int=1, accumulate:int=1):
-    best_loss, counter = torch.tensor(float('inf')), 0
-    for epoch in range(n_epochs):
-        print(f'Epoch {epoch+1:03d}/{n_epochs:03d}')
-        train_loss = optimise(model=model, train_loader=train_loader, device=device, criterion=criterion, optimiser=optimiser, accumulate=accumulate)
-        # Early stopping
-        valid_loss = validate(model=model, loader=valid_loader, device=device, criterion=criterion)
-        if valid_loss < best_loss:
-            best_loss = valid_loss
-            counter = 0
-            torch.save(model, model_path)
-        else:
-            counter += 1
-            if counter >= patience:
-                print('- Early stopping')
-                break
+logger = loggers.CSVLogger(
+    save_dir='../data/models/logs', 
+    name=model_name, 
+    version=0
+)
 
-# Freezes image encoder's parameters
-set_trainable(module=model.image_encoder, trainable=False)
-set_trainable(module=model.prediction_head, trainable=True)
-count_parameters(model=model)
+model_checkpoint = callbacks.ModelCheckpoint(
+    dirpath='../data/models',
+    filename=f'{model_name}-{{epoch:02d}}-{{step:05d}}',
+    monitor='step',
+    every_n_train_steps=1e3,
+    save_top_k=1,
+    save_last=True
+)
 
-# Initialises optimiser and criterion
-criterion = BceLoss(focal=True, drop_nan=True, alpha=0.25, gamma=2.0)
-optimiser = optim.AdamW(params=model.parameters(), lr=1e-4, betas=(0.9, 0.999))
+early_stopping = callbacks.EarlyStopping(
+    monitor='val_loss',
+    mode='min',
+    patience=1,
+    verbose=True
+)
 
-# Training
-train(model=model,
-      train_loader=train_loader,
-      valid_loader=valid_loader,
-      device=device,
-      criterion=criterion,
-      optimiser=optimiser,
-      model_path='../models/vitmae_prepost_aligned.pth',
-      n_epochs=100,
-      patience=3,
-      accumulate=4)
+trainer = pl.Trainer(
+    max_epochs=10,
+    accelerator='mps',
+    log_every_n_steps=1e3,
+    logger=logger,
+    callbacks=[model_checkpoint, early_stopping],
+    profiler=profilers.SimpleProfiler()
+)
 
-# Clears GPU memory
-empty_cache(device=device)
+# Fits model
+trainer.fit(
+    model=model_module, 
+    datamodule=data_module,
+    ckpt_path=model_checkpoint.last_model_path if model_checkpoint.last_model_path else None,
+)
 
-#%% OPTIMISATION 2: FINES TUNES THE ENTIRE MODEL
-
-# Unfreezes image encoder's parameters
-set_trainable(module=model.image_encoder, trainable=status_list)
-set_trainable(module=model.prediction_head, trainable=True)
-count_parameters(model=model)
-
-# Initialises optimiser and criterion
-criterion = BceLoss(focal=True, drop_nan=True, alpha=0.25, gamma=2.0)
-optimiser = optim.AdamW(params=model.parameters(), lr=1e-4, betas=(0.9, 0.999))
-
-# Training
-train(model=model, 
-      train_loader=train_loader, 
-      valid_loader=valid_loader, 
-      device=device,
-      criterion=criterion, 
-      optimiser=optimiser, 
-      model_path='../models/vitmae_prepost_finetuned.pth',
-      n_epochs=100, 
-      patience=3,
-      accumulate=4)
-
-# Clears GPU memory
-empty_cache(device=device)
-
+# Saves model
+trainer.save_checkpoint(f'../data/models/{model_name}-e{trainer.current_epoch:02d}-s{trainer.global_step:05d}.ckpt')
+empty_cache()
 #%%
