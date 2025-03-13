@@ -215,14 +215,14 @@ class SiameseModule(pl.LightningModule):
         D, Yh = self.model(X)
         loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
         loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
-        train_loss  = loss_S + self.weigh_contrast * loss_C
+        train_loss = loss_S + self.weigh_contrast * loss_C
+        self.log('train_loss', train_loss, prog_bar=True)
         # Metrics
         probs = torch.sigmoid(Yh)
         self.accuracy_metric.update(probs, Y)
         self.auroc_metric.update(probs, Y)
-        self.log('train_loss', train_loss, prog_bar=True)
-        self.log('train_acc', self.accuracy_metric, on_step=True, on_epoch=True, prog_bar=True)
-        self.log('train_auroc', self.auroc_metric, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('train_acc', self.accuracy_metric, on_step=False, on_epoch=True, prog_bar=True)
+        self.log('train_auroc', self.auroc_metric, on_step=False, on_epoch=True, prog_bar=True)
         return train_loss
     
     def validation_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
@@ -231,13 +231,13 @@ class SiameseModule(pl.LightningModule):
         loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
         loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
         val_loss = loss_S + self.weigh_contrast * loss_C
+        self.log('val_loss', val_loss, prog_bar=True)
         # Metrics
         probs = torch.sigmoid(Yh)
         self.accuracy_metric.update(probs, Y)
         self.auroc_metric.update(probs, Y)
-        self.log('val_loss', val_loss, prog_bar=True)
-        self.log('val_acc', self.accuracy_metric, on_step=True, on_epoch=True, prog_bar=True)
-        self.log('val_auroc', self.auroc_metric, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('valid_acc', self.accuracy_metric, on_step=False, on_epoch=True, prog_bar=True)
+        self.log('valid_auroc', self.auroc_metric, on_step=False, on_epoch=True, prog_bar=True)
         return val_loss
     
     def test_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
@@ -246,13 +246,13 @@ class SiameseModule(pl.LightningModule):
         loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
         loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
         test_loss = loss_S + self.weigh_contrast * loss_C
+        self.log('test_loss', test_loss, prog_bar=True)
         # Metrics
         probs = torch.sigmoid(Yh)
         self.accuracy_metric.update(probs, Y)
         self.auroc_metric.update(probs, Y)
-        self.log('test_loss', test_loss, prog_bar=True)
-        self.log('test_acc', self.accuracy_metric, on_step=True, on_epoch=True, prog_bar=True)
-        self.log('test_auroc', self.auroc_metric, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('test_acc', self.accuracy_metric, on_step=False, on_epoch=True, prog_bar=True)
+        self.log('test_auroc', self.auroc_metric, on_step=False, on_epoch=True, prog_bar=True)
         return test_loss
 
     def configure_optimizers(self) -> dict:
@@ -311,7 +311,7 @@ trainer.fit(
 )
 
 trainer.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage1.ckpt')
-empty_cache()
+empty_cache(device=device)
 
 # Optimisation step 2: Fine-tunes full model
 model_module.unfreeze_encoder()
@@ -322,5 +322,5 @@ trainer.fit(
 )
 
 trainer.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage2.ckpt')
-empty_cache()
+empty_cache(device=device)
 #%%
