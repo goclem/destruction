@@ -224,7 +224,7 @@ class SiameseModule(pl.LightningModule):
         self.log('train_acc', self.accuracy_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
         self.log('train_auroc', self.auroc_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
         return train_loss
-    
+
     def validation_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
         X, Y  = batch
         D, Yh = self.model(X)
@@ -258,6 +258,18 @@ class SiameseModule(pl.LightningModule):
     def configure_optimizers(self) -> dict:
         optimizer = optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
         return {'optimizer':optimizer}
+    
+    def training_epoch_end(self, outputs:list) -> None:
+        self.accuracy_metric.reset()
+        self.auroc_metric.reset()
+    
+    def validation_epoch_end(self, outputs:list) -> None:
+        self.accuracy_metric.reset()
+        self.auroc_metric.reset()
+    
+    def test_epoch_end(self, outputs:list) -> None:
+        self.accuracy_metric.reset()
+        self.auroc_metric.reset()
 
 # Initialises model module
 model_module = SiameseModule(
