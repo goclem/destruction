@@ -1,0 +1,14 @@
+universe = vanilla
+executable              = vitmae_finetune_siamese.sh
+# arguments               = 
+log                     = condor_logs/logfile.$(Cluster).$(Process).log
+output                  = condor_logs/outfile.$(Cluster).$(Process).out
+error                   = condor_logs/errors.$(Cluster).$(Process).err
+
+# Needed to read .bashrc and conda environment
+getenv = True
+
+request_gpus = 1
+# TestJob CPU
+# +testJob = True
+queue
