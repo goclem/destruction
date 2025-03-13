@@ -221,8 +221,8 @@ class SiameseModule(pl.LightningModule):
         probs = torch.sigmoid(Yh)
         self.accuracy_metric.update(probs, Y)
         self.auroc_metric.update(probs, Y)
-        self.log('train_acc', self.accuracy_metric, on_step=False, on_epoch=True, prog_bar=True)
-        self.log('train_auroc', self.auroc_metric, on_step=False, on_epoch=True, prog_bar=True)
+        self.log('train_acc', self.accuracy_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
+        self.log('train_auroc', self.auroc_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
         return train_loss
     
     def validation_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
@@ -236,8 +236,8 @@ class SiameseModule(pl.LightningModule):
         probs = torch.sigmoid(Yh)
         self.accuracy_metric.update(probs, Y)
         self.auroc_metric.update(probs, Y)
-        self.log('valid_acc', self.accuracy_metric, on_step=False, on_epoch=True, prog_bar=True)
-        self.log('valid_auroc', self.auroc_metric, on_step=False, on_epoch=True, prog_bar=True)
+        self.log('val_acc', self.accuracy_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
+        self.log('val_auroc', self.auroc_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
         return val_loss
     
     def test_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
@@ -251,8 +251,8 @@ class SiameseModule(pl.LightningModule):
         probs = torch.sigmoid(Yh)
         self.accuracy_metric.update(probs, Y)
         self.auroc_metric.update(probs, Y)
-        self.log('test_acc', self.accuracy_metric, on_step=False, on_epoch=True, prog_bar=True)
-        self.log('test_auroc', self.auroc_metric, on_step=False, on_epoch=True, prog_bar=True)
+        self.log('test_acc', self.accuracy_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
+        self.log('test_auroc', self.auroc_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
         return test_loss
 
     def configure_optimizers(self) -> dict:
