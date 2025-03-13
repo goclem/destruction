@@ -263,15 +263,15 @@ class SiameseModule(pl.LightningModule):
         optimizer = optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
         return {'optimizer':optimizer}
     
-    def on_train_epoch_end(self, outputs:list) -> None:
+    def on_train_epoch_end(self) -> None:
         self.accuracy_metric.reset()
         self.auroc_metric.reset()
     
-    def on_validation_epoch_end(self, outputs:list) -> None:
+    def on_validation_epoch_end(self) -> None:
         self.accuracy_metric.reset()
         self.auroc_metric.reset()
     
-    def on_test_epoch_end(self, outputs:list) -> None:
+    def on_test_epoch_end(self) -> None:
         self.accuracy_metric.reset()
         self.auroc_metric.reset()
 
