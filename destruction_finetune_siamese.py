@@ -113,9 +113,9 @@ class ZarrDataModule(pl.LightningDataModule):
         self.shuffle = shuffle
     
     def setup(self, stage:str=None):
-        self.train_datasets = [ZarrDataset(**train_datafiles[city]) for city in params.cities]
-        self.valid_datasets = [ZarrDataset(**valid_datafiles[city]) for city in params.cities]
-        self.test_datasets  = [ZarrDataset(**test_datafiles[city])  for city in params.cities]
+        self.train_datasets = [ZarrDataset(**self.train_datafiles[city]) for city in params.cities]
+        self.valid_datasets = [ZarrDataset(**self.valid_datafiles[city]) for city in params.cities]
+        self.test_datasets  = [ZarrDataset(**self.test_datafiles[city])  for city in params.cities]
 
     def train_dataloader(self):
         return ZarrDataLoader(datafiles=self.train_datafiles, datasets=self.train_datasets, label_map=self.label_map, batch_size=self.batch_size, shuffle=self.shuffle)
@@ -143,7 +143,15 @@ del X, Y, idx
 
 #%% INITIALISES MODEL MODULE
 
-def contrastive_loss(distance:torch.Tensor, label:torch.Tensor, margin:float=1.0) -> torch.Tensor:
+''' Notes
+- We average the last hidden state, it's supposed to be more robust than selecting the first token
+- The pairwise distance function actually sums the tensors (64 x 768) (64 x 768) > (64 x 1)
+- It's good practice to have a single unit (output) turning the distance into a logit score
+- We don't apply sigmoid because sigmoid_focal_loss requires logit scores
+- I implemented contrastive loss as a function rather than a class so it works in the same way as sigmoid_focal_loss
+'''
+
+def contrastive_loss(distance:torch.Tensor, label:torch.Tensor, margin:float) -> torch.Tensor:
     loss = (1 - label) * torch.pow(distance, 2) + label * torch.pow(torch.clamp(margin - distance, min=0.0), 2)
     return loss.mean()
 
@@ -153,33 +161,36 @@ class SiameseModel(nn.Module):
         super().__init__()
         self.processor = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
         self.encoder   = transformers.ViTMAEModel.from_pretrained(backbone)
-        self.output    = nn.Linear(768, 1)
+        self.output    = nn.Linear(1, 1)
 
-    def forward_branch(self, X:torch.Tensor) -> torch.Tensor:
-        H = self.processor(X, return_tensors='pt', do_resize=True).to(device)
-        H = self.image_encoder(**H.to(device))
-        H = H.last_hidden_state[:,0,:]
-        return H
+    def forward_branch(self, Xt:torch.Tensor) -> torch.Tensor:
+        Ht = self.processor(Xt, return_tensors='pt', do_resize=True)
+        Ht = self.encoder(**Ht.to(device))
+        Ht = Ht.last_hidden_state.mean(dim=1) # Alternative H = H.last_hidden_state[:,0,:] 
+        return Ht
 
-    def forward(self, X0:torch.Tensor, X1:torch.Tensor, Y:torch.Tensor=None) -> torch.Tensor:
-        H0 = self.forward_branch(X0)
-        H1 = self.forward_branch(X1)
-        D  = F.pairwise_distance(H0, H1, keepdim=True)
-        Y  = self.output(D)
+    def forward(self, X:torch.Tensor, Y:torch.Tensor=None) -> torch.Tensor:
+        H0 = self.forward_branch(X[:,0])
+        H1 = self.forward_branch(X[:,1])
+        D = F.pairwise_distance(H0, H1, keepdim=True)
+        Y = self.output(D)
         return D, Y
 
 class SiameseModule(pl.LightningModule):
     
-    def __init__(self, backbone:str, learning_rate:float=1e-4, weight_decay:float=0.05):
+    def __init__(self, model:str, model_name:str, learning_rate:float=1e-4, weight_decay:float=0.05, weigh_contrast:float=0.0, margin_contrast=1.0):
         
         super().__init__()
         self.save_hyperparameters()
-        self.model = SiameseModule(backbone=backbone)
-        self.contrastive_loss = contrastive_loss
-        self.sigmoid_loss = torchvision.ops.sigmoid_focal_loss
-        self.learning_rate = learning_rate
-        self.weight_decay  = weight_decay
-        self.trainable     = None
+        self.model = model
+        self.model_name      = model_name
+        self.contrast_loss   = contrastive_loss
+        self.sigmoid_loss    = torchvision.ops.sigmoid_focal_loss
+        self.learning_rate   = learning_rate
+        self.weight_decay    = weight_decay
+        self.weigh_contrast  = weigh_contrast
+        self.margin_contrast = 1.0
+        self.trainable       = None
 
     def freeze_encoder(self):
         self.trainable = [param.requires_grad for param in self.model.encoder.parameters()]
@@ -198,58 +209,62 @@ class SiameseModule(pl.LightningModule):
         return Y
     
     def training_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
-        X, Y   = batch
-        D, Yh  = self.model(X).squeeze()
-        C_loss = self.contrastive_loss(D, Y, reduction='mean')
-        S_loss = self.sigmoid_loss(Yh, Y, reduction='mean')
-        train_loss = C_loss + S_loss
+        X, Y  = batch
+        D, Yh = self.model(X)
+        loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
+        loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
+        train_loss = loss_S + self.weigh_contrast * loss_C
         self.log('train_loss', train_loss, prog_bar=True)
         return train_loss
     
     def validation_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
-        X, Y   = batch
-        D, Yh  = self.model(X).squeeze()
-        C_loss = self.contrastive_loss(D, Y, reduction='mean')
-        S_loss = self.sigmoid_loss(Yh, Y, reduction='mean')
-        val_loss = C_loss + S_loss
+        X, Y  = batch
+        D, Yh = self.model(X)
+        loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
+        loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
+        val_loss = loss_S + self.weigh_contrast * loss_C
         self.log('val_loss', val_loss, prog_bar=True)
         return val_loss
     
     def test_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
-        X, Y   = batch
-        D, Yh  = self.model(X).squeeze()
-        C_loss = self.contrastive_loss(D, Y, reduction='mean')
-        S_loss = self.sigmoid_loss(Yh, Y, reduction='mean')
-        test_loss = C_loss + S_loss
+        X, Y  = batch
+        D, Yh = self.model(X)
+        loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
+        loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
+        test_loss = loss_S + self.weigh_contrast * loss_C
         self.log('test_loss', test_loss, prog_bar=True)
         return test_loss
 
     def configure_optimizers(self) -> dict:
         optimizer = optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
         return {'optimizer':optimizer}
-    
-# Initialises model
-model_module = SiameseModule(backbone=f'{paths.models}/checkpoint-9920')
-model_module.freeze_encoder()
-model_name = 'destruction_finetune_siamese'
+
+# Initialises model module
+model_module = SiameseModule(
+    model=SiameseModel(backbone=f'{paths.models}/checkpoint-9920'), 
+    model_name='destruction_finetune_siamese', 
+    learning_rate=1e-4, 
+    weight_decay=0.05,
+    weigh_contrast=0.0)
 
 #%% TRAINS MODEL
 
+# Initialises logger
 logger = loggers.CSVLogger(
-    save_dir='../data/models/logs', 
-    name=model_name, 
+    save_dir=f'{paths.models}/logs', 
+    name=model_module.model_name, 
     version=0
 )
 
+# Initialises callbacks
 model_checkpoint = callbacks.ModelCheckpoint(
-    dirpath='../data/models',
-    filename=f'{model_name}-{{epoch:02d}}-{{step:05d}}',
+    dirpath=paths.models,
+    filename=f'{model_module.model_name}-{{epoch:02d}}-{{step:05d}}',
     monitor='step',
     every_n_train_steps=1e3,
     save_top_k=1,
     save_last=True
 )
-
 early_stopping = callbacks.EarlyStopping(
     monitor='val_loss',
     mode='min',
@@ -257,23 +272,35 @@ early_stopping = callbacks.EarlyStopping(
     verbose=True
 )
 
+# Initialises trainer
 trainer = pl.Trainer(
-    max_epochs=10,
-    accelerator='mps',
+    max_epochs=100,
+    accelerator=device,
     log_every_n_steps=1e3,
     logger=logger,
     callbacks=[model_checkpoint, early_stopping],
     profiler=profilers.SimpleProfiler()
 )
 
-# Fits model
+# Optimisation step 1: Aligns output layer
+model_module.freeze_encoder()
 trainer.fit(
     model=model_module, 
     datamodule=data_module,
     ckpt_path=model_checkpoint.last_model_path if model_checkpoint.last_model_path else None,
 )
 
-# Saves model
-trainer.save_checkpoint(f'../data/models/{model_name}-e{trainer.current_epoch:02d}-s{trainer.global_step:05d}.ckpt')
+trainer.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage1.ckpt')
+empty_cache()
+
+# Optimisation step 2: Fine-tunes full model
+model_module.unfreeze_encoder()
+trainer.fit(
+    model=model_module, 
+    datamodule=data_module,
+    ckpt_path=model_checkpoint.last_model_path if model_checkpoint.last_model_path else None,
+)
+
+trainer.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage2.ckpt')
 empty_cache()
 #%%
