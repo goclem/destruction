@@ -78,19 +78,6 @@ damage.insert(len(damage.columns), 'post', damage[damage.T.last_valid_index()]) 
 filling = damage.T.ffill().bfill().T
 defined = damage.T.bfill().ffill().T
 filling[filling != defined] = 255
-
-# Writes damage labels
-damage = gpd.GeoDataFrame(data=filling[dates].astype(int), geometry=geoms)
-
-print('Writing damage labels')
-for date in dates:
-    print(f' - Processing period {date}')
-    subset = damage[[date, 'geometry']].sort_values(by=date) # Sorting retains the maximum recorded destruction per pixel
-    subset = rasterise(source=subset, profile=profile, varname=date)
-    write_raster(array=subset, profile=profile, destination=f'{paths.data}/{params.city}/labels/label_{date}.tif')
-
-del damage, geoms, filling, defined, dates, date, subset
-
 '''Checks filling
 for i in random.choice(np.arange(damage.shape[0]), 1):
     print(pd.concat((damage.iloc[i], filling.iloc[i]), axis=1, keys=['damage', 'filling']))

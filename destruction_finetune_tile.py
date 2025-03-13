@@ -22,8 +22,12 @@ from destruction_utilities import *
 
 # Utilities
 device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
+parser = argparse.ArgumentParser()
+parser.add_argument('--cities', nargs='+', type=str, default=['aleppo', 'moschun'], help='List of city names')
+args = parser.parse_args()
+
 params = argparse.Namespace(
-    cities=['aleppo', 'moschun'],
+    cities=args.cities,
     batch_size=64,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
 
