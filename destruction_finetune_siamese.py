@@ -304,7 +304,16 @@ early_stopping = callbacks.EarlyStopping(
     verbose=True
 )
 
-# Initialises trainer
+# Aligns output layer (1 unit)
+model_module.freeze_encoder()
+count_parameters(model_module)
+trainer = pl.Trainer(max_epochs=1, accelerator=device)
+trainer.fit(model=model_module, datamodule=data_module)
+
+# Fine-tunes full model
+model_module.unfreeze_encoder()
+count_parameters(model_module)
+
 trainer = pl.Trainer(
     max_epochs=100,
     accelerator=device,
@@ -314,25 +323,13 @@ trainer = pl.Trainer(
     profiler=profilers.SimpleProfiler()
 )
 
-# Optimisation step 1: Aligns output layer
-model_module.freeze_encoder()
 trainer.fit(
     model=model_module, 
     datamodule=data_module,
     ckpt_path=model_checkpoint.last_model_path if model_checkpoint.last_model_path else None,
 )
 
-trainer.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage1.ckpt')
-empty_cache(device=device)
-
-# Optimisation step 2: Fine-tunes full model
-model_module.unfreeze_encoder()
-trainer.fit(
-    model=model_module, 
-    datamodule=data_module,
-    ckpt_path=model_checkpoint.last_model_path if model_checkpoint.last_model_path else None,
-)
-
-trainer.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage2.ckpt')
+# Saves model
+trainer.save_checkpoint(f'{paths.models}/{model_module.model_name}.ckpt')
 empty_cache(device=device)
 #%%
