@@ -191,7 +191,8 @@ class SiameseModule(pl.LightningModule):
         self.weigh_contrast  = weigh_contrast
         self.margin_contrast = 1.0
         self.trainable       = None
-        self.accuracy        = classification.BinaryAccuracy(threshold=0.5)
+        self.accuracy_metric = classification.BinaryAccuracy()
+        self.auroc_metric    = classification.BinaryAUROC()
 
     def freeze_encoder(self):
         self.trainable = [param.requires_grad for param in self.model.encoder.parameters()]
@@ -214,10 +215,14 @@ class SiameseModule(pl.LightningModule):
         D, Yh = self.model(X)
         loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
         loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
-        train_loss = loss_S + self.weigh_contrast * loss_C
-        train_acc  = self.accuracy(torch.sigmoid(Yh), Y)
+        train_loss  = loss_S + self.weigh_contrast * loss_C
+        # Metrics
+        probs = torch.sigmoid(Yh)
+        self.accuracy_metric.update(probs, Y)
+        self.auroc_metric.update(probs, Y)
         self.log('train_loss', train_loss, prog_bar=True)
-        self.log('train_acc', train_acc, prog_bar=True)
+        self.log('train_acc', self.accuracy_metric, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('train_auroc', self.auroc_metric, on_step=True, on_epoch=True, prog_bar=True)
         return train_loss
     
     def validation_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
@@ -226,9 +231,13 @@ class SiameseModule(pl.LightningModule):
         loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
         loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
         val_loss = loss_S + self.weigh_contrast * loss_C
-        val_acc  = self.accuracy(torch.sigmoid(Yh), Y)
+        # Metrics
+        probs = torch.sigmoid(Yh)
+        self.accuracy_metric.update(probs, Y)
+        self.auroc_metric.update(probs, Y)
         self.log('val_loss', val_loss, prog_bar=True)
-        self.log('val_acc', val_acc, prog_bar=True)
+        self.log('val_acc', self.accuracy_metric, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('val_auroc', self.auroc_metric, on_step=True, on_epoch=True, prog_bar=True)
         return val_loss
     
     def test_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
@@ -237,9 +246,13 @@ class SiameseModule(pl.LightningModule):
         loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
         loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
         test_loss = loss_S + self.weigh_contrast * loss_C
-        test_acc  = self.accuracy(torch.sigmoid(Yh), Y)
+        # Metrics
+        probs = torch.sigmoid(Yh)
+        self.accuracy_metric.update(probs, Y)
+        self.auroc_metric.update(probs, Y)
         self.log('test_loss', test_loss, prog_bar=True)
-        self.log('test_acc', test_acc, prog_bar=True)
+        self.log('test_acc', self.accuracy_metric, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('test_auroc', self.auroc_metric, on_step=True, on_epoch=True, prog_bar=True)
         return test_loss
 
     def configure_optimizers(self) -> dict:
