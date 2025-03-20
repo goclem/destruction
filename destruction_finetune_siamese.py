@@ -16,7 +16,6 @@ import numpy as np
 import pytorch_lightning as pl
 import transformers
 import torch
-from torch.serialization import safe_globals
 import torchvision
 
 from destruction_models import *
@@ -324,30 +323,20 @@ model_module.freeze_encoder()
 trainer1.fit(
     model=model_module, 
     datamodule=data_module,
-    ckpt_path=model_checkpoint.last_model_path if model_checkpoint.last_model_path else None,
+    #ckpt_path=model_checkpoint.last_model_path if model_checkpoint.last_model_path else None,
 )
 
 trainer1.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage1.ckpt')
 empty_cache(device=device)
 
 # Optimisation step 2: Fine-tunes full model
-# Load only the weights from stage 1.
-# This avoids reloading the optimizer state or frozen status.
-with safe_globals([SiameseModel]):
-    checkpoint = torch.load(
-        f'{paths.models}/{model_module.model_name}_stage1.ckpt', 
-        map_location=device, 
-        weights_only=True
-    )
-
-model_module.load_state_dict(checkpoint)
-
 model_module.unfreeze_encoder()
-print("unfreeze encoder")
+
+# It’s a good idea to use a new Trainer so that the model's trainer attribute is updated.
 trainer2 = pl.Trainer(
     max_epochs=100,
     accelerator=device,
-    log_every_n_steps=1e3,
+    log_every_n_steps=1000,
     logger=logger,
     callbacks=[model_checkpoint, early_stopping],
     profiler=profilers.SimpleProfiler()
@@ -356,7 +345,7 @@ trainer2 = pl.Trainer(
 trainer2.fit(
     model=model_module, 
     datamodule=data_module,
-    ckpt_path=None,
+    #ckpt_path=model_checkpoint.last_model_path if model_checkpoint.last_model_path else None,
 )
 
 trainer2.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage2.ckpt')
