@@ -292,14 +292,6 @@ logger = loggers.CSVLogger(
     version=0
 )
 
-# Define a callback that will unfreeze the encoder when the new trainer begins fit.
-class UnfreezeCallback(pl.Callback):
-    def on_fit_start(self, trainer, pl_module):
-        # Check if any encoder parameter is still frozen
-        if any(not param.requires_grad for param in pl_module.model.encoder.parameters()):
-            pl_module.unfreeze_encoder()
-            print("Encoder unfrozen in on_fit_start callback.")
-            
 # Initialises callbacks
 model_checkpoint = callbacks.ModelCheckpoint(
     dirpath=paths.models,
@@ -328,48 +320,42 @@ trainer1 = pl.Trainer(
 
 # Optimisation step 1: Aligns output layer
 model_module.freeze_encoder()
-trainer1.fit(model=model_module, datamodule=data_module)
+trainer1.fit(
+    model=model_module, 
+    datamodule=data_module,
+    ckpt_path=model_checkpoint.last_model_path if model_checkpoint.last_model_path else None,
+)
+
 trainer1.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage1.ckpt')
 empty_cache(device=device)
 
-"""trainer.fit(
-    model=model_module, 
-    datamodule=data_module,
-    ckpt_path=model_checkpoint.last_model_path if model_checkpoint.last_model_path else None,
-)
-trainer.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage1.ckpt')
-empty_cache(device=device)
-"""
-
 # Optimisation step 2: Fine-tunes full model
-# Manually load the weights from stage 1 into the current model
-checkpoint = torch.load(f'{paths.models}/{model_module.model_name}_stage1.ckpt', map_location=device)
-model_module.load_state_dict(checkpoint['state_dict'])
+# Load only the weights from stage 1.
+# This avoids reloading the optimizer state or frozen status.
+checkpoint = torch.load(
+    f'{paths.models}/{model_module.model_name}_stage1.ckpt', 
+    map_location=device, 
+    weights_only=True
+)
+model_module.load_state_dict(checkpoint)
 
-# Instantiate a new trainer for stage 2, adding the UnfreezeCallback.
+model_module.unfreeze_encoder()
+print("unfreeze encoder")
 trainer2 = pl.Trainer(
     max_epochs=100,
     accelerator=device,
-    log_every_n_steps=1000,
+    log_every_n_steps=1e3,
     logger=logger,
-    callbacks=[model_checkpoint, early_stopping, UnfreezeCallback()],
+    callbacks=[model_checkpoint, early_stopping],
     profiler=profilers.SimpleProfiler()
 )
 
-# Run training from the current state (with ckpt_path=None so no checkpoint reload happens)
-trainer2.fit(model=model_module, datamodule=data_module, ckpt_path=None)
-trainer2.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage2.ckpt')
-empty_cache(device=device)
-
-"""
-model_module.unfreeze_encoder()
-trainer.fit(
+trainer2.fit(
     model=model_module, 
     datamodule=data_module,
-    ckpt_path=model_checkpoint.last_model_path if model_checkpoint.last_model_path else None,
+    ckpt_path=None,
 )
 
-trainer.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage2.ckpt')
+trainer2.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage2.ckpt')
 empty_cache(device=device)
-"""
 #%%
