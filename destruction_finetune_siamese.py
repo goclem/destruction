@@ -16,6 +16,7 @@ import numpy as np
 import pytorch_lightning as pl
 import transformers
 import torch
+from torch.serialization import safe_globals
 import torchvision
 
 from destruction_models import *
@@ -332,11 +333,13 @@ empty_cache(device=device)
 # Optimisation step 2: Fine-tunes full model
 # Load only the weights from stage 1.
 # This avoids reloading the optimizer state or frozen status.
-checkpoint = torch.load(
-    f'{paths.models}/{model_module.model_name}_stage1.ckpt', 
-    map_location=device, 
-    weights_only=True
-)
+with safe_globals([SiameseModel]):
+    checkpoint = torch.load(
+        f'{paths.models}/{model_module.model_name}_stage1.ckpt', 
+        map_location=device, 
+        weights_only=True
+    )
+
 model_module.load_state_dict(checkpoint)
 
 model_module.unfreeze_encoder()
