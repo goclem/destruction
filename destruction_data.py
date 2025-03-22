@@ -183,7 +183,7 @@ for sample in ['train', 'valid', 'test']:
 del sample, src_images, src_labels, dst_images, dst_labels, n, T, c, h, w, t
 
 #%% BALANCES THE SEQUENCE DATASET BY DOWNSAMPLING NO-DESTRUCTION SEQUENCES
-
+"""
 print('Downsampling no-destruction sequences')
 for sample in ['train', 'valid', 'test']:
     print(f' - Processing sample {sample}')
@@ -210,7 +210,7 @@ for sample in ['train', 'valid', 'test']:
     dst_labels[:] = src_labels[indices]
 
 del sample, src_images, src_labels, dst_images, dst_labels, destroy, untouch, indices
-
+"""
 #%% BALANCES THE PRE-POST DATASET BY DOWNSAMPLING NO-DESTRUCTION PRE-POST PAIRS
 
 print('Downsampling no-destruction pre-post pairs')
