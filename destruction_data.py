@@ -34,7 +34,8 @@ params = argparse.Namespace(
     sequence_ratio=1,
     prepost_npre=1, #! Number of pre-images
     prepost_ratio=1,
-    tile_ratio=1)
+    tile_ratio=1,
+    chunk_size=30000)     # Adjust chunk size according to your memory constraints.
 
 #%% COMPUTES SAMPLES
 
@@ -183,7 +184,7 @@ for sample in ['train', 'valid', 'test']:
 del sample, src_images, src_labels, dst_images, dst_labels, n, T, c, h, w, t
 
 #%% BALANCES THE SEQUENCE DATASET BY DOWNSAMPLING NO-DESTRUCTION SEQUENCES
-"""
+
 print('Downsampling no-destruction sequences')
 for sample in ['train', 'valid', 'test']:
     print(f' - Processing sample {sample}')
@@ -193,7 +194,8 @@ for sample in ['train', 'valid', 'test']:
     dst_images = f'{paths.data}/{params.city}/zarr/images_sequence_{sample}_balanced.zarr'
     dst_labels = f'{paths.data}/{params.city}/zarr/labels_sequence_{sample}_balanced.zarr'
     # Reads source datasets
-    src_images = zarr.open(src_images, mode='r')[:]
+    src_images = zarr.open(src_images, mode='r')
+    total_samples = src_images.shape[0]
     src_labels = zarr.open(src_labels, mode='r')[:]
     # Subsets source datasets
     destroy = [k for k, v in params.label_map.items() if v == 1]
@@ -202,15 +204,63 @@ for sample in ['train', 'valid', 'test']:
     indices = np.concatenate((
         np.where(destroy)[0], # Includes all destroyed samples
         np.random.choice(untouch, params.sequence_ratio * np.sum(destroy), replace=False)))
-    np.random.shuffle(indices)
+    
     # Writes destination datasets
     dst_images = zarr.open(dst_images, mode='w', shape=(len(indices), *src_images.shape[1:]), dtype=src_images.dtype)
     dst_labels = zarr.open(dst_labels, mode='w', shape=(len(indices), *src_labels.shape[1:]), dtype=src_labels.dtype)
-    dst_images[:] = src_images[indices]
-    dst_labels[:] = src_labels[indices]
+    
+    # Check if the data is too large to be processed at once
+    if src_images.shape[0] > params.chunk_size:
+        print(f"\t - Number of sequences {src_images.shape[0]} will be loaded in chunks of {params.chunk_size}")
+        # Sort the desired indices so that we can iterate over them in order.
+        indices_sorted = np.sort(indices)
+        pos_dst = 0  # Keeps track of where to write in the destination array
 
+        # Iterate over the source array in chunks
+        for start in range(0, total_samples, params.chunk_size):
+            stop = min(total_samples, start + params.chunk_size)
+            
+            # Find all indices from indices_sorted that fall in the current chunk [start, stop)
+            mask = (indices_sorted >= start) & (indices_sorted < stop)
+            if not np.any(mask):
+                continue  # no desired indices in this chunk
+            
+            # Get the indices (local to the chunk) that we want to extract
+            local_indices = indices_sorted[mask] - start
+            
+            # Load the current chunk from the source (only this chunk is read into memory)
+            chunk_data = src_images[start:stop]
+            
+            # Extract the required images from the chunk using local indices
+            extracted = chunk_data[local_indices]
+            
+            # Write them into the destination array at the correct position
+            dst_images[pos_dst:pos_dst + len(extracted)] = extracted
+            pos_dst += len(extracted)
+        
+        # Set the destination labels to the same indices as the destination images
+        dst_labels[:] = src_labels[indices]
+
+        # Now, shuffle the destination arrays so that the order is randomized.
+        perm = np.random.permutation(dst_images.shape[0])
+        # Shuffle images.
+        shuffled_images = dst_images[:]  # load entire destination images into memory
+        dst_images[:] = shuffled_images[perm]
+        
+        # Shuffle labels in the same order.
+        shuffled_labels = dst_labels[:]  # load entire destination labels into memory
+        dst_labels[:] = shuffled_labels[perm]
+    
+    # If the data can be processed at once    
+    else: 
+        print(f"\t - Number of sequences {src_images.shape[0]} will be loaded at once")
+        np.random.shuffle(indices)
+        src_images = src_images[:]
+        dst_images[:] = src_images[indices]
+        dst_labels[:] = src_labels[indices]
+    
 del sample, src_images, src_labels, dst_images, dst_labels, destroy, untouch, indices
-"""
+
 #%% BALANCES THE PRE-POST DATASET BY DOWNSAMPLING NO-DESTRUCTION PRE-POST PAIRS
 
 print('Downsampling no-destruction pre-post pairs')
@@ -222,7 +272,7 @@ for sample in ['train', 'valid', 'test']:
     dst_images = f'{paths.data}/{params.city}/zarr/images_prepost_{sample}_balanced.zarr'
     dst_labels = f'{paths.data}/{params.city}/zarr/labels_prepost_{sample}_balanced.zarr'
     # Reads source datasets
-    src_images = zarr.open(src_images, mode='r')[:]
+    src_images = zarr.open(src_images, mode='r')
     src_labels = zarr.open(src_labels, mode='r')[:]
     # Subsets datasets
     destroy = [k for k, v in params.label_map.items() if v == 1]
@@ -231,13 +281,60 @@ for sample in ['train', 'valid', 'test']:
     indices = np.concatenate((
         np.where(destroy)[0],
         np.random.choice(untouch, params.prepost_ratio * np.sum(destroy), replace=False)))
-    np.random.shuffle(indices)
-    # Writes data
+    
+    # Writes destination datasets
     dst_images = zarr.open(dst_images, mode='w', shape=(len(indices), *src_images.shape[1:]), dtype=src_images.dtype)
     dst_labels = zarr.open(dst_labels, mode='w', shape=(len(indices), *src_labels.shape[1:]), dtype=src_labels.dtype)
-    dst_images[:] = src_images[indices]
-    dst_labels[:] = src_labels[indices]
+    
+    # Check if the data is too large to be processed at once
+    if src_images.shape[0] > params.chunk_size:
+        print(f"\t - Number of sequences {src_images.shape[0]} will be loaded in chunks of {params.chunk_size}")
+        # Sort the desired indices so that we can iterate over them in order.
+        indices_sorted = np.sort(indices)
+        pos_dst = 0  # Keeps track of where to write in the destination array
 
+        # Iterate over the source array in chunks
+        for start in range(0, total_samples, params.chunk_size):
+            stop = min(total_samples, start + params.chunk_size)
+            
+            # Find all indices from indices_sorted that fall in the current chunk [start, stop)
+            mask = (indices_sorted >= start) & (indices_sorted < stop)
+            if not np.any(mask):
+                continue  # no desired indices in this chunk
+            
+            # Get the indices (local to the chunk) that we want to extract
+            local_indices = indices_sorted[mask] - start
+            
+            # Load the current chunk from the source (only this chunk is read into memory)
+            chunk_data = src_images[start:stop]
+            
+            # Extract the required images from the chunk using local indices
+            extracted = chunk_data[local_indices]
+            
+            # Write them into the destination array at the correct position
+            dst_images[pos_dst:pos_dst + len(extracted)] = extracted
+            pos_dst += len(extracted)
+        
+        # Set the destination labels to the same indices as the destination images
+        dst_labels[:] = src_labels[indices]
+
+        # Now, shuffle the destination arrays so that the order is randomized.
+        perm = np.random.permutation(dst_images.shape[0])
+        # Shuffle images.
+        shuffled_images = dst_images[:]  # load entire destination images into memory
+        dst_images[:] = shuffled_images[perm]
+        
+        # Shuffle labels in the same order.
+        shuffled_labels = dst_labels[:]  # load entire destination labels into memory
+        dst_labels[:] = shuffled_labels[perm]
+    
+    # If the data can be processed at once    
+    else: 
+        print(f"\t - Number of sequences {src_images.shape[0]} will be loaded at once")
+        np.random.shuffle(indices)
+        src_images = src_images[:]
+        dst_images[:] = src_images[indices]
+        dst_labels[:] = src_labels[indices]
 del sample, src_images, src_labels, dst_images, dst_labels, destroy, untouch, indices
 
 #%% BALANCES THE TILE DATASET BY DOWNSAMPLING NO-DESTRUCTION TILES
@@ -251,7 +348,7 @@ for sample in ['train', 'valid', 'test']:
     dst_images = f'{paths.data}/{params.city}/zarr/images_tile_{sample}_balanced.zarr'
     dst_labels = f'{paths.data}/{params.city}/zarr/labels_tile_{sample}_balanced.zarr'
     # Reads source datasets
-    src_images = zarr.open(src_images, mode='r')[:]
+    src_images = zarr.open(src_images, mode='r')
     src_labels = zarr.open(src_labels, mode='r')[:]
     # Subsets datasets
     destroy = [k for k, v in params.label_map.items() if v == 1]
@@ -260,12 +357,60 @@ for sample in ['train', 'valid', 'test']:
     indices = np.concatenate((
         np.where(destroy)[0],
         np.random.choice(untouch, params.tile_ratio * np.sum(destroy), replace=False)))
-    np.random.shuffle(indices)
-    # Writes data
+    
+    # Writes destination datasets
     dst_images = zarr.open(dst_images, mode='w', shape=(len(indices), *src_images.shape[1:]), dtype=src_images.dtype)
     dst_labels = zarr.open(dst_labels, mode='w', shape=(len(indices), *src_labels.shape[1:]), dtype=src_labels.dtype)
-    dst_images[:] = src_images[indices]
-    dst_labels[:] = src_labels[indices]
+    
+    # Check if the data is too large to be processed at once
+    if src_images.shape[0] > params.chunk_size:
+        print(f"\t - Number of sequences {src_images.shape[0]} will be loaded in chunks of {params.chunk_size}")
+        # Sort the desired indices so that we can iterate over them in order.
+        indices_sorted = np.sort(indices)
+        pos_dst = 0  # Keeps track of where to write in the destination array
+
+        # Iterate over the source array in chunks
+        for start in range(0, total_samples, params.chunk_size):
+            stop = min(total_samples, start + params.chunk_size)
+            
+            # Find all indices from indices_sorted that fall in the current chunk [start, stop)
+            mask = (indices_sorted >= start) & (indices_sorted < stop)
+            if not np.any(mask):
+                continue  # no desired indices in this chunk
+            
+            # Get the indices (local to the chunk) that we want to extract
+            local_indices = indices_sorted[mask] - start
+            
+            # Load the current chunk from the source (only this chunk is read into memory)
+            chunk_data = src_images[start:stop]
+            
+            # Extract the required images from the chunk using local indices
+            extracted = chunk_data[local_indices]
+            
+            # Write them into the destination array at the correct position
+            dst_images[pos_dst:pos_dst + len(extracted)] = extracted
+            pos_dst += len(extracted)
+        
+        # Set the destination labels to the same indices as the destination images
+        dst_labels[:] = src_labels[indices]
+
+        # Now, shuffle the destination arrays so that the order is randomized.
+        perm = np.random.permutation(dst_images.shape[0])
+        # Shuffle images.
+        shuffled_images = dst_images[:]  # load entire destination images into memory
+        dst_images[:] = shuffled_images[perm]
+        
+        # Shuffle labels in the same order.
+        shuffled_labels = dst_labels[:]  # load entire destination labels into memory
+        dst_labels[:] = shuffled_labels[perm]
+    
+    # If the data can be processed at once    
+    else: 
+        print(f"\t - Number of sequences {src_images.shape[0]} will be loaded at once")
+        np.random.shuffle(indices)
+        src_images = src_images[:]
+        dst_images[:] = src_images[indices]
+        dst_labels[:] = src_labels[indices]
 
 del sample, src_images, src_labels, dst_images, dst_labels, destroy, untouch, indices
 
