@@ -304,7 +304,7 @@ model_checkpoint = callbacks.ModelCheckpoint(
 early_stopping = callbacks.EarlyStopping(
     monitor='val_loss',
     mode='min',
-    patience=3,
+    patience=1,
     verbose=True
 )
 
