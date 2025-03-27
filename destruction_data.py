@@ -239,7 +239,7 @@ for sample in ['train', 'valid', 'test']:
             pos_dst += len(extracted)
         
         # Set the destination labels to the same indices as the destination images
-        dst_labels[:] = src_labels[indices]
+        dst_labels[:] = src_labels[indices_sorted]
 
         # Now, shuffle the destination arrays so that the order is randomized.
         perm = np.random.permutation(dst_images.shape[0])
@@ -316,7 +316,7 @@ for sample in ['train', 'valid', 'test']:
             pos_dst += len(extracted)
         
         # Set the destination labels to the same indices as the destination images
-        dst_labels[:] = src_labels[indices]
+        dst_labels[:] = src_labels[indices_sorted]
 
         # Now, shuffle the destination arrays so that the order is randomized.
         perm = np.random.permutation(dst_images.shape[0])
@@ -392,7 +392,7 @@ for sample in ['train', 'valid', 'test']:
             pos_dst += len(extracted)
         
         # Set the destination labels to the same indices as the destination images
-        dst_labels[:] = src_labels[indices]
+        dst_labels[:] = src_labels[indices_sorted]
 
         # Now, shuffle the destination arrays so that the order is randomized.
         perm = np.random.permutation(dst_images.shape[0])
