@@ -11,8 +11,8 @@
 # There seems to be an error when including deirezzor or homs, this has to be investigated
 
 # Looks like Homs and Aleppo didn't work
-python3 destruction_finetune_siamese.py --cities aleppo hostomel irpin livoberezhnyi moschun volnovakha daraa hama idlib raqqa
-#python3 destruction_finetune_siamese.py --cities aleppo
+#python3 destruction_finetune_siamese.py --cities aleppo hostomel irpin livoberezhnyi moschun volnovakha daraa hama idlib raqqa
+python3 destruction_finetune_siamese.py --cities aleppo
 
 # Define an array of cities
 #cities=(hostomel aleppo homs)
