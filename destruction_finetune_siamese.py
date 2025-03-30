@@ -46,11 +46,20 @@ class ZarrDataset(utils.data.Dataset):
     
     def __len__(self):
         return self.length
+
+    # Getitem CNN
+    def __getitem__(self, idx):
+        X = torch.from_numpy(self.images[idx]).float()
+        Y = torch.from_numpy(self.labels[idx]).float()
+        X = X / 255.0
+        return X, Y
     
+    """ 
+    # Getitem Transformer
     def __getitem__(self, idx):
         X = torch.from_numpy(self.images[idx])
         Y = torch.from_numpy(self.labels[idx])
-        return X, Y
+        return X, Y"""
 
 class ZarrDataLoader:
 
@@ -154,11 +163,211 @@ del X, Y, idx
 - We don't apply sigmoid because sigmoid_focal_loss requires logit scores
 - I implemented contrastive loss as a function rather than a class so it works in the same way as sigmoid_focal_loss
 '''
+### Old Model - CNN based
+
+class DenseBlock(nn.Module):
+    def __init__(self, in_features: int, out_features: int, dropout: float = 0.0):
+        super().__init__()
+        self.linear = nn.Linear(in_features, out_features, bias=False)
+        self.activation = nn.ReLU()
+        self.bn = nn.BatchNorm1d(out_features)
+        self.dropout = nn.Dropout(dropout)
+        # He (Kaiming) normal initialization
+        nn.init.kaiming_normal_(self.linear.weight, nonlinearity='relu')
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.linear(x)
+        x = self.activation(x)
+        x = self.bn(x)
+        x = self.dropout(x)
+        return x
+
+class CNNEncoder(nn.Module):
+    def __init__(self, in_channels: int = 3, base_filters: int = 32, dropout: float = 0.1, 
+                 n_convs: int = 1, n_blocks: int = 3):
+        """
+        Creates a CNN encoder.
+        For each block i (i from 0 to n_blocks-1), we set:
+          block_filters = (base_filters * 2) // (i+1)
+        Each block runs n_convs convolution operations, each doing:
+            Conv2d (3x3, padding=1, no bias) -> ReLU -> BatchNorm2d -> MaxPool2d(2) -> Dropout2d.
+        """
+        super().__init__()
+        layers_list = []
+        current_channels = in_channels
+
+        for i in range(n_blocks):
+            block_filters = (base_filters * 2) // (i + 1)
+            # Repeat the convolutional operation n_convs times in this block:
+            for j in range(n_convs):
+                conv = nn.Conv2d(current_channels, block_filters, kernel_size=3, padding=1, bias=False)
+                layers_list.append(conv)
+                layers_list.append(nn.ReLU())
+                layers_list.append(nn.BatchNorm2d(block_filters))
+                layers_list.append(nn.MaxPool2d(kernel_size=2))
+                layers_list.append(nn.Dropout2d(dropout))
+                # Update the number of channels for the next layer in the same block
+                current_channels = block_filters
+
+        layers_list.append(nn.Flatten())
+        self.model = nn.Sequential(*layers_list)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.model(x)
+
+
+class SiameseCNNModel(nn.Module):
+    def __init__(self, 
+                 in_channels: int = 3, 
+                 img_size: int = 224, 
+                 base_filters: int = 32, 
+                 dropout: float = 0.1, 
+                 n_convs: int = 1, 
+                 n_blocks: int = 3, 
+                 dense_units: int = 128):
+        """
+        This model accepts a tensor X of shape (B, 2, C, H, W) and processes each image 
+        in the pair with a shared CNN encoder. The resulting flattened features are concatenated,
+        then passed through three dense blocks and a final linear layer to output a single logit.
+        """
+        super().__init__()
+        self.encoder = CNNEncoder(in_channels, base_filters, dropout, n_convs, n_blocks)
+        # Determine the encoder’s flattened feature dimension by a dummy pass
+        with torch.no_grad():
+            dummy = torch.zeros(1, in_channels, img_size, img_size)
+            feat_dim = self.encoder(dummy).shape[1]
+        # After processing a pair, the concatenated feature vector has dimension 2*feat_dim.
+        self.dense_block1 = DenseBlock(2 * feat_dim, dense_units, dropout)
+        self.dense_block2 = DenseBlock(dense_units, dense_units, dropout)
+        self.dense_block3 = DenseBlock(dense_units, dense_units, dropout)
+        self.output = nn.Linear(dense_units, 1)
+        # (Optionally, initialize self.output if needed)
+        nn.init.kaiming_normal_(self.output.weight, nonlinearity='sigmoid')
+
+    def forward_branch(self, x: torch.Tensor) -> torch.Tensor:
+        return self.encoder(x)
+
+    def forward(self, X: torch.Tensor) -> torch.Tensor:
+        """
+        Expects input X of shape (B, 2, C, H, W). The two images are processed separately,
+        their encoded (flattened) features concatenated, and then run through dense layers.
+        """
+        # Split the two images
+        x1 = X[:, 0]  # shape: (B, C, H, W)
+        x2 = X[:, 1]  # shape: (B, C, H, W)
+        feat1 = self.forward_branch(x1)
+        feat2 = self.forward_branch(x2)
+        # Concatenate along the feature dimension
+        concat = torch.cat([feat1, feat2], dim=1)
+        D = F.pairwise_distance(feat1, feat2, keepdim=True)
+        out = self.dense_block1(concat)
+        out = self.dense_block2(out)
+        out = self.dense_block3(out)
+        out = self.output(out)
+        # We leave the final activation (sigmoid) out because the loss (sigmoid focal loss) expects logits.
+
+        return D, out
 
 def contrastive_loss(distance:torch.Tensor, label:torch.Tensor, margin:float) -> torch.Tensor:
     loss = (1 - label) * torch.pow(distance, 2) + label * torch.pow(torch.clamp(margin - distance, min=0.0), 2)
     return loss.mean()
 
+class SiameseCNNModule(pl.LightningModule):
+    def __init__(self, model: nn.Module, model_name: str, learning_rate: float = 1e-4, weight_decay: float = 0.05, weigh_contrast:float=0.0):
+        """
+        This Lightning module wraps the SiameseCNNModel.
+        It uses torchvision’s sigmoid focal loss (which expects logits) and computes 
+        binary accuracy and AUROC as metrics.
+        """
+        super().__init__()
+        self.save_hyperparameters(ignore=['model'])
+        self.model = model
+        self.model_name = model_name
+        self.contrast_loss   = contrastive_loss
+        self.sigmoid_loss    = torchvision.ops.sigmoid_focal_loss
+        self.weigh_contrast  = weigh_contrast
+        self.margin_contrast = 1.0
+        self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
+        self.accuracy_metric = classification.BinaryAccuracy()
+        self.auroc_metric = classification.BinaryAUROC()
+
+    def forward(self, X: torch.Tensor) -> torch.Tensor:
+        return self.model(X)
+
+    def training_step(self, batch: tuple, batch_idx: int) -> torch.Tensor:
+        X, Y = batch  # X: (B,2,C,H,W), Y: (B,1) (or (B,))
+        D, Yh = self.model(X)
+        loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
+        loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
+        loss = loss_S + self.weigh_contrast * loss_C
+        self.log('train_loss', loss, prog_bar=True)
+        probs = torch.sigmoid(Yh)
+        self.accuracy_metric.update(probs, Y)
+        self.auroc_metric.update(probs, Y)
+        self.log('train_acc', self.accuracy_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
+        self.log('train_auroc', self.auroc_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
+        return loss
+
+    def validation_step(self, batch: tuple, batch_idx: int) -> torch.Tensor:
+        X, Y = batch
+        D, Yh = self.model(X)
+        loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
+        loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
+        loss = loss_S + self.weigh_contrast * loss_C
+        self.log('val_loss', loss, prog_bar=True)
+        probs = torch.sigmoid(Yh)
+        self.accuracy_metric.update(probs, Y)
+        self.auroc_metric.update(probs, Y)
+        self.log('val_acc', self.accuracy_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
+        self.log('val_auroc', self.auroc_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
+        return loss
+
+    def test_step(self, batch: tuple, batch_idx: int) -> torch.Tensor:
+        X, Y = batch
+        D, Yh = self.model(X)
+        loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
+        loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
+        loss = loss_S + self.weigh_contrast * loss_C
+        self.log('test_loss', loss, prog_bar=True)
+        probs = torch.sigmoid(Yh)
+        self.accuracy_metric.update(probs, Y)
+        self.auroc_metric.update(probs, Y)
+        self.log('test_acc', self.accuracy_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
+        self.log('test_auroc', self.auroc_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
+        return loss
+
+    def configure_optimizers(self):
+        optimizer = optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
+        return optimizer
+
+    def on_train_epoch_end(self) -> None:
+        self.accuracy_metric.reset()
+        self.auroc_metric.reset()
+
+    def on_validation_epoch_end(self) -> None:
+        self.accuracy_metric.reset()
+        self.auroc_metric.reset()
+
+    def on_test_epoch_end(self) -> None:
+        self.accuracy_metric.reset()
+        self.auroc_metric.reset()
+
+cnn_model = SiameseCNNModel(in_channels=3, img_size=128, base_filters=128, dropout=0.1, n_convs=1, n_blocks=3, dense_units=64)
+
+# Wrap it in the Lightning module.
+model_module = SiameseCNNModule(
+    model=cnn_model,
+    model_name='destruction_cnn_siamese',
+    learning_rate=1e-4,
+    weight_decay=0.05
+)
+
+
+
+
+"""
+### New Model - Transformer based
 class SiameseModel(nn.Module):
     
     def __init__(self, backbone:str):
@@ -282,7 +491,7 @@ model_module = SiameseModule(
     learning_rate=1e-4, 
     weight_decay=0.05,
     weigh_contrast=0.0)
-
+"""
 #%% TRAINS MODEL
 
 # Initialises logger
@@ -317,9 +526,9 @@ trainer1 = pl.Trainer(
     callbacks=[model_checkpoint, early_stopping],
     profiler=profilers.SimpleProfiler()
 )
-
+    
 # Optimisation step 1: Aligns output layer
-model_module.freeze_encoder()
+#model_module.freeze_encoder()
 trainer1.fit(
     model=model_module, 
     datamodule=data_module,
@@ -327,7 +536,7 @@ trainer1.fit(
 )
 
 trainer1.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage1.ckpt')
-empty_cache(device=device)
+"""empty_cache(device=device)
 
 # Optimisation step 2: Fine-tunes full model
 model_module.unfreeze_encoder()
@@ -349,5 +558,5 @@ trainer2.fit(
 )
 
 trainer2.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage2.ckpt')
-empty_cache(device=device)
+empty_cache(device=device)"""
 #%%

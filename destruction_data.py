@@ -38,7 +38,7 @@ params = argparse.Namespace(
     chunk_size=2000)     # Adjust chunk size according to your memory constraints.
 
 #%% COMPUTES SAMPLES
-"""
+
 # Computes analysis zone
 profile    = search_data(pattern=pattern(city=params.city, type='image'))[0]
 profile    = tiled_profile(profile, tile_size=params.tile_size)
@@ -182,7 +182,7 @@ for sample in ['train', 'valid', 'test']:
         dst_labels[n*t:(t+1)*n,:] = src_labels[:,t,:]
 
 del sample, src_images, src_labels, dst_images, dst_labels, n, T, c, h, w, t
-"""
+
 #%% BALANCES THE SEQUENCE DATASET BY DOWNSAMPLING NO-DESTRUCTION SEQUENCES
 
 print('Downsampling no-destruction sequences')
