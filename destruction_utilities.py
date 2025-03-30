@@ -97,6 +97,7 @@ def write_raster(array:np.ndarray, profile, destination:str, update:dict=None) -
     if update is not None:
         profile.update(**update)
     profile.update(count=count)
+    profile['nodata'] = None
     with rasterio.open(fp=destination, mode='w', **profile) as raster:
         raster.write(array)
         raster.close()
