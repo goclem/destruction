@@ -8,7 +8,7 @@
 
 #declare -a Cities=("hostomel" "irpin" "livoberezhnyi" "moschun" "volnovakha" "aleppo" "damascus" "daraa" "deirezzor" "hama" "homs" "idlib" "raqqa")
 #declare -a Cities=("damascus" "daraa" "deirezzor" "hama" "homs" "idlib" "raqqa")
-declare -a Cities=("rubizhne") # "volnovakha" "moschun")
+declare -a Cities=("kharkiv") # "volnovakha" "moschun")
 
 for city in "${Cities[@]}"; do
     echo "Preprocessing" $city
