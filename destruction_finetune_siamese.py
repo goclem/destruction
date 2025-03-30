@@ -46,20 +46,21 @@ class ZarrDataset(utils.data.Dataset):
     
     def __len__(self):
         return self.length
-
+    """
     # Getitem CNN
     def __getitem__(self, idx):
         X = torch.from_numpy(self.images[idx]).float()
         Y = torch.from_numpy(self.labels[idx]).float()
         X = X / 255.0
         return X, Y
-    
+        
     """ 
+    
     # Getitem Transformer
     def __getitem__(self, idx):
         X = torch.from_numpy(self.images[idx])
         Y = torch.from_numpy(self.labels[idx])
-        return X, Y"""
+        return X, Y
 
 class ZarrDataLoader:
 
@@ -163,8 +164,13 @@ del X, Y, idx
 - We don't apply sigmoid because sigmoid_focal_loss requires logit scores
 - I implemented contrastive loss as a function rather than a class so it works in the same way as sigmoid_focal_loss
 '''
-### Old Model - CNN based
 
+def contrastive_loss(distance:torch.Tensor, label:torch.Tensor, margin:float) -> torch.Tensor:
+    loss = (1 - label) * torch.pow(distance, 2) + label * torch.pow(torch.clamp(margin - distance, min=0.0), 2)
+    return loss.mean()
+
+### Old Model - CNN based
+'''
 class DenseBlock(nn.Module):
     def __init__(self, in_features: int, out_features: int, dropout: float = 0.0):
         super().__init__()
@@ -268,10 +274,6 @@ class SiameseCNNModel(nn.Module):
 
         return D, out
 
-def contrastive_loss(distance:torch.Tensor, label:torch.Tensor, margin:float) -> torch.Tensor:
-    loss = (1 - label) * torch.pow(distance, 2) + label * torch.pow(torch.clamp(margin - distance, min=0.0), 2)
-    return loss.mean()
-
 class SiameseCNNModule(pl.LightningModule):
     def __init__(self, model: nn.Module, model_name: str, learning_rate: float = 1e-4, weight_decay: float = 0.05, weigh_contrast:float=0.0):
         """
@@ -362,11 +364,10 @@ model_module = SiameseCNNModule(
     learning_rate=1e-4,
     weight_decay=0.05
 )
+'''
 
 
 
-
-"""
 ### New Model - Transformer based
 class SiameseModel(nn.Module):
     
@@ -491,7 +492,7 @@ model_module = SiameseModule(
     learning_rate=1e-4, 
     weight_decay=0.05,
     weigh_contrast=0.0)
-"""
+
 #%% TRAINS MODEL
 
 # Initialises logger
@@ -528,7 +529,7 @@ trainer1 = pl.Trainer(
 )
     
 # Optimisation step 1: Aligns output layer
-#model_module.freeze_encoder()
+model_module.freeze_encoder()
 trainer1.fit(
     model=model_module, 
     datamodule=data_module,
@@ -536,7 +537,7 @@ trainer1.fit(
 )
 
 trainer1.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage1.ckpt')
-"""empty_cache(device=device)
+empty_cache(device=device)
 
 # Optimisation step 2: Fine-tunes full model
 model_module.unfreeze_encoder()
@@ -558,5 +559,5 @@ trainer2.fit(
 )
 
 trainer2.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage2.ckpt')
-empty_cache(device=device)"""
+empty_cache(device=device)
 #%%
