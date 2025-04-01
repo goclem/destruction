@@ -32,7 +32,7 @@ args = parser.parse_args()
 
 params = argparse.Namespace(
     cities=args.cities,
-    batch_size=64,
+    batch_size=32,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
 
 #%% INITIALISES DATA MODULE
@@ -47,21 +47,20 @@ class ZarrDataset(utils.data.Dataset):
     def __len__(self):
         return self.length
     
-    """
     # Getitem CNN
     def __getitem__(self, idx):
         X = torch.from_numpy(self.images[idx]).float()
         Y = torch.from_numpy(self.labels[idx]).float()
         X = X / 255.0
         return X, Y
-    """    
         
+    """    
     # Getitem Transformer
     def __getitem__(self, idx):
         X = torch.from_numpy(self.images[idx])
         Y = torch.from_numpy(self.labels[idx])
         return X, Y
-    
+    """
 
 class ZarrDataLoader:
 
@@ -171,7 +170,7 @@ def contrastive_loss(distance:torch.Tensor, label:torch.Tensor, margin:float) ->
     return loss.mean()
 
 ### Old Model - CNN based
-'''
+
 class DenseBlock(nn.Module):
     def __init__(self, in_features: int, out_features: int, dropout: float = 0.0):
         super().__init__()
@@ -356,17 +355,18 @@ class SiameseCNNModule(pl.LightningModule):
         self.accuracy_metric.reset()
         self.auroc_metric.reset()
 
-cnn_model = SiameseCNNModel(in_channels=3, img_size=128, base_filters=128, dropout=0.1, n_convs=1, n_blocks=3, dense_units=64)
+cnn_model = SiameseCNNModel(in_channels=3, img_size=128, base_filters=64, dropout=0.1, n_convs=1, n_blocks=3, dense_units=64)
 
 # Wrap it in the Lightning module.
 model_module = SiameseCNNModule(
     model=cnn_model,
     model_name='destruction_cnn_siamese',
-    learning_rate=1e-4,
+    #learning_rate=1e-4,
+    learning_rate=3e-5,
     weight_decay=0.05
 )
 
-'''
+"""
 ### New Model - Transformer based
 class SiameseModel(nn.Module):
     
@@ -491,7 +491,7 @@ model_module = SiameseModule(
     learning_rate=1e-4, 
     weight_decay=0.05,
     weigh_contrast=0.0)
-
+"""
 
 #%% TRAINS MODEL
 
@@ -529,7 +529,7 @@ trainer1 = pl.Trainer(
 )
     
 # Optimisation step 1: Aligns output layer
-model_module.freeze_encoder()
+#model_module.freeze_encoder()
 trainer1.fit(
     model=model_module, 
     datamodule=data_module,
@@ -537,7 +537,7 @@ trainer1.fit(
 )
 
 trainer1.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage1.ckpt')
-
+"""
 empty_cache(device=device)
 
 # Optimisation step 2: Fine-tunes full model
@@ -561,5 +561,5 @@ trainer2.fit(
 
 trainer2.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage2.ckpt')
 empty_cache(device=device)
-
+"""
 #%%
