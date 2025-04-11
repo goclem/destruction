@@ -76,6 +76,8 @@ class ZarrDataLoader:
 
     def compute_data_indices(self):
         slice_sizes  = np.cbrt(self.data_sizes)
+        if slice_sizes.sum() <= 0:
+            raise ValueError("Sum of slice_sizes is zero or negative; check your dataset lengths.")
         slice_sizes  = np.divide(slice_sizes, slice_sizes.sum())
         slice_sizes  = np.random.multinomial(self.batch_size, slice_sizes, size=int(np.max(self.data_sizes / self.batch_size)))
         data_indices = np.vstack((np.zeros(len(self.data_sizes), dtype=int), np.cumsum(slice_sizes, axis=0)))
