@@ -39,12 +39,14 @@ class ZarrDataset(utils.data.Dataset):
         self.images = zarr.open(images_zarr, mode='r')
         self.labels = zarr.open(labels_zarr, mode='r')
         self.length = len(self.images)
+        self.processor = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
     
     def __len__(self):
         return self.length
     
     def __getitem__(self, idx):
-        X = torch.from_numpy(self.images[idx])
+        X = self.images[idx]
+        X = torch.stack([self.processor(x, return_tensors='pt')['pixel_values'] for x in X])
         Y = torch.from_numpy(self.labels[idx])
         return X, Y
 
@@ -93,7 +95,7 @@ class ZarrDataLoader:
                 X_ds, Y_ds = dataset[start:end]
                 X.append(X_ds), 
                 Y.append(Y_ds)
-        X, Y = torch.cat(X), torch.cat(Y)
+        X, Y = torch.cat(X, dim=0), torch.cat(Y, dim=0)
         # Remaps labels
         for key, value in self.label_map.items():
             Y = torch.where(Y == key, value, Y)
@@ -111,7 +113,7 @@ class ZarrDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.label_map = label_map
         self.shuffle = shuffle
-    
+
     def setup(self, stage:str=None):
         self.train_datasets = [ZarrDataset(**self.train_datafiles[city]) for city in params.cities]
         self.valid_datasets = [ZarrDataset(**self.valid_datafiles[city]) for city in params.cities]
@@ -143,14 +145,6 @@ del X, Y, idx
 
 #%% INITIALISES MODEL MODULE
 
-''' Notes
-- We average the last hidden state, it's supposed to be more robust than selecting the first token
-- The pairwise distance function actually sums the tensors (64 x 768) (64 x 768) > (64 x 1)
-- It's good practice to have a single unit (output) turning the distance into a logit score
-- We don't apply sigmoid because sigmoid_focal_loss requires logit scores
-- I implemented contrastive loss as a function rather than a class so it works in the same way as sigmoid_focal_loss
-'''
-
 def contrastive_loss(distance:torch.Tensor, label:torch.Tensor, margin:float) -> torch.Tensor:
     loss = (1 - label) * torch.pow(distance, 2) + label * torch.pow(torch.clamp(margin - distance, min=0.0), 2)
     return loss.mean()
@@ -159,22 +153,27 @@ class SiameseModel(nn.Module):
     
     def __init__(self, backbone:str):
         super().__init__()
-        self.processor = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
         self.encoder   = transformers.ViTMAEModel.from_pretrained(backbone)
-        self.output    = nn.Linear(1, 1)
+        self.model_dim = self.encoder.config.hidden_size
+        self.projector = nn.Sequential(
+            nn.Linear(self.model_dim, self.model_dim//2),
+            nn.GELU(),
+            nn.Linear(self.model_dim//2, self.model_dim//2)
+        )
+        self.output = nn.Linear(1, 1)
 
     def forward_branch(self, Xt:torch.Tensor) -> torch.Tensor:
-        Ht = self.processor(Xt, return_tensors='pt', do_resize=True)
-        Ht = self.encoder(**Ht.to(device))
-        Ht = Ht.last_hidden_state.mean(dim=1) # Alternative H = H.last_hidden_state[:,0,:] 
+        Ht = self.encoder(Xt)
+        Ht = Ht.last_hidden_state[:, 0, ...]
+        Ht = self.projector(Ht)
         return Ht
 
     def forward(self, X:torch.Tensor, Y:torch.Tensor=None) -> torch.Tensor:
         H0 = self.forward_branch(X[:,0])
         H1 = self.forward_branch(X[:,1])
-        D = F.pairwise_distance(H0, H1, keepdim=True)
-        Y = self.output(D)
-        return D, Y
+        D  = F.cosine_similarity(H0, H1, dim=1, eps=1e-8).unsqueeze(1)
+        Yh = self.output(D)
+        return D, Yh
 
 class SiameseModule(pl.LightningModule):
     
@@ -211,8 +210,8 @@ class SiameseModule(pl.LightningModule):
         return Y
     
     def training_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
-        X, Y  = batch
-        D, Yh = self.model(X)
+        X, Y   = batch
+        D, Yh  = self.model(X)
         loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
         loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
         train_loss = loss_S + self.weigh_contrast * loss_C
@@ -222,12 +221,12 @@ class SiameseModule(pl.LightningModule):
         self.accuracy_metric.update(probs, Y)
         self.auroc_metric.update(probs, Y)
         self.log('train_acc', self.accuracy_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
-        self.log('train_auroc', self.auroc_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
+        self.log('train_auroc', self.auroc_metric.compute(),  on_step=True, on_epoch=True, prog_bar=True)
         return train_loss
 
     def validation_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
-        X, Y  = batch
-        D, Yh = self.model(X)
+        X, Y   = batch
+        D, Yh  = self.model(X)
         loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
         loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
         val_loss = loss_S + self.weigh_contrast * loss_C
@@ -237,12 +236,12 @@ class SiameseModule(pl.LightningModule):
         self.accuracy_metric.update(probs, Y)
         self.auroc_metric.update(probs, Y)
         self.log('val_acc', self.accuracy_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
-        self.log('val_auroc', self.auroc_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
+        self.log('val_auroc', self.auroc_metric.compute(),  on_step=True, on_epoch=True, prog_bar=True)
         return val_loss
     
     def test_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
-        X, Y  = batch
-        D, Yh = self.model(X)
+        X, Y   = batch
+        D, Yh  = self.model(X)
         loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
         loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
         test_loss = loss_S + self.weigh_contrast * loss_C
@@ -252,22 +251,22 @@ class SiameseModule(pl.LightningModule):
         self.accuracy_metric.update(probs, Y)
         self.auroc_metric.update(probs, Y)
         self.log('test_acc', self.accuracy_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
-        self.log('test_auroc', self.auroc_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
+        self.log('test_auroc', self.auroc_metric.compute(),  on_step=True, on_epoch=True, prog_bar=True)
         return test_loss
 
     def configure_optimizers(self) -> dict:
         optimizer = optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
         return {'optimizer':optimizer}
     
-    def training_epoch_end(self, outputs:list) -> None:
+    def on_train_epoch_end(self) -> None:
         self.accuracy_metric.reset()
         self.auroc_metric.reset()
     
-    def validation_epoch_end(self, outputs:list) -> None:
+    def on_validation_epoch_end(self) -> None:
         self.accuracy_metric.reset()
         self.auroc_metric.reset()
     
-    def test_epoch_end(self, outputs:list) -> None:
+    def on_test_epoch_end(self) -> None:
         self.accuracy_metric.reset()
         self.auroc_metric.reset()
 
@@ -275,9 +274,9 @@ class SiameseModule(pl.LightningModule):
 model_module = SiameseModule(
     model=SiameseModel(backbone=f'{paths.models}/checkpoint-9920'), 
     model_name='destruction_finetune_siamese', 
-    learning_rate=1e-4, 
+    learning_rate=1e-4,
     weight_decay=0.05,
-    weigh_contrast=0.0)
+    weigh_contrast=0.1) #! Should be tuned
 
 #%% TRAINS MODEL
 

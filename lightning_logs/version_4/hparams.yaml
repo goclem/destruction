@@ -1,0 +1,5 @@
+learning_rate: 0.0001
+margin_contrast: 1.0
+model_name: destruction_finetune_siamese
+weigh_contrast: 0.0
+weight_decay: 0.05
