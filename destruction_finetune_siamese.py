@@ -155,7 +155,12 @@ class SiameseModel(nn.Module):
         super().__init__()
         self.encoder   = transformers.ViTMAEModel.from_pretrained(backbone)
         self.model_dim = self.encoder.config.hidden_size
-        self.projector = nn.Sequential(
+        self.project0  = nn.Sequential(
+            nn.Linear(self.model_dim, self.model_dim//2),
+            nn.GELU(),
+            nn.Linear(self.model_dim//2, self.model_dim//2)
+        )
+        self.project1  = nn.Sequential(
             nn.Linear(self.model_dim, self.model_dim//2),
             nn.GELU(),
             nn.Linear(self.model_dim//2, self.model_dim//2)
@@ -165,12 +170,13 @@ class SiameseModel(nn.Module):
     def forward_branch(self, Xt:torch.Tensor) -> torch.Tensor:
         Ht = self.encoder(Xt)
         Ht = Ht.last_hidden_state[:, 0, ...]
-        Ht = self.projector(Ht)
         return Ht
 
     def forward(self, X:torch.Tensor, Y:torch.Tensor=None) -> torch.Tensor:
         H0 = self.forward_branch(X[:,0])
+        H0 = self.project0(H0)
         H1 = self.forward_branch(X[:,1])
+        H1 = self.project1(H1)
         D  = F.cosine_similarity(H0, H1, dim=1, eps=1e-8).unsqueeze(1)
         Yh = self.output(D)
         return D, Yh
