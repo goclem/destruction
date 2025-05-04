@@ -48,21 +48,22 @@ class ZarrDataset(utils.data.Dataset):
     def __len__(self):
         return self.length
     
+    '''
     # Getitem CNN
     def __getitem__(self, idx):
         X = torch.from_numpy(self.images[idx]).float()
         Y = torch.from_numpy(self.labels[idx]).float()
         X = X / 255.0
         return X, Y
+    '''    
         
-    """    
     # Getitem Transformer
     def __getitem__(self, idx):
         X = self.images[idx]
         X = torch.stack([self.processor(x, return_tensors='pt')['pixel_values'] for x in X])
         Y = torch.from_numpy(self.labels[idx])
         return X, Y
-    """
+    
 
 class ZarrDataLoader:
 
@@ -166,7 +167,7 @@ def contrastive_loss(distance:torch.Tensor, label:torch.Tensor, margin:float) ->
     return loss.mean()
 
 ### Old Model - CNN based
-
+'''
 class DenseBlock(nn.Module):
     def __init__(self, in_features: int, out_features: int, dropout: float = 0.0):
         super().__init__()
@@ -270,6 +271,7 @@ class SiameseCNNModel(nn.Module):
 
         return D, out
 
+
 class SiameseCNNModule(pl.LightningModule):
     def __init__(self, model: nn.Module, model_name: str, learning_rate: float = 1e-4, weight_decay: float = 0.05, weigh_contrast:float=0.0):
         """
@@ -362,6 +364,7 @@ model_module = SiameseCNNModule(
     weight_decay=0.05
 )
 
+'''
 
 ### New Model - Transformer based
 class SiameseModel(nn.Module):
@@ -546,7 +549,7 @@ trainer = pl.Trainer(
 trainer.fit(
     model=model_module, 
     datamodule=data_module,
-    #ckpt_path=model_checkpoint.last_model_path if model_checkpoint.last_model_path else None,
+    ckpt_path=model_checkpoint.last_model_path if model_checkpoint.last_model_path else None,
 )
 
 # Saves model
