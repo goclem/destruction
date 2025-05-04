@@ -43,6 +43,7 @@ class ZarrDataset(utils.data.Dataset):
         self.images = zarr.open(images_zarr, mode='r')
         self.labels = zarr.open(labels_zarr, mode='r')
         self.length = len(self.images)
+        self.processor = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
     
     def __len__(self):
         return self.length
@@ -57,7 +58,8 @@ class ZarrDataset(utils.data.Dataset):
     """    
     # Getitem Transformer
     def __getitem__(self, idx):
-        X = torch.from_numpy(self.images[idx])
+        X = self.images[idx]
+        X = torch.stack([self.processor(x, return_tensors='pt')['pixel_values'] for x in X])
         Y = torch.from_numpy(self.labels[idx])
         return X, Y
     """
@@ -109,7 +111,7 @@ class ZarrDataLoader:
                 X_ds, Y_ds = dataset[start:end]
                 X.append(X_ds), 
                 Y.append(Y_ds)
-        X, Y = torch.cat(X), torch.cat(Y)
+        X, Y = torch.cat(X, dim=0), torch.cat(Y, dim=0)
         # Remaps labels
         for key, value in self.label_map.items():
             Y = torch.where(Y == key, value, Y)
@@ -127,7 +129,7 @@ class ZarrDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.label_map = label_map
         self.shuffle = shuffle
-    
+
     def setup(self, stage:str=None):
         self.train_datasets = [ZarrDataset(**self.train_datafiles[city]) for city in params.cities]
         self.valid_datasets = [ZarrDataset(**self.valid_datafiles[city]) for city in params.cities]
@@ -158,14 +160,6 @@ del X, Y, idx
 '''
 
 #%% INITIALISES MODEL MODULE
-
-''' Notes
-- We average the last hidden state, it's supposed to be more robust than selecting the first token
-- The pairwise distance function actually sums the tensors (64 x 768) (64 x 768) > (64 x 1)
-- It's good practice to have a single unit (output) turning the distance into a logit score
-- We don't apply sigmoid because sigmoid_focal_loss requires logit scores
-- I implemented contrastive loss as a function rather than a class so it works in the same way as sigmoid_focal_loss
-'''
 
 def contrastive_loss(distance:torch.Tensor, label:torch.Tensor, margin:float) -> torch.Tensor:
     loss = (1 - label) * torch.pow(distance, 2) + label * torch.pow(torch.clamp(margin - distance, min=0.0), 2)
@@ -368,28 +362,39 @@ model_module = SiameseCNNModule(
     weight_decay=0.05
 )
 
-"""
+
 ### New Model - Transformer based
 class SiameseModel(nn.Module):
     
     def __init__(self, backbone:str):
         super().__init__()
-        self.processor = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
         self.encoder   = transformers.ViTMAEModel.from_pretrained(backbone)
-        self.output    = nn.Linear(1, 1)
+        self.model_dim = self.encoder.config.hidden_size
+        self.project0  = nn.Sequential(
+            nn.Linear(self.model_dim, self.model_dim//2),
+            nn.GELU(),
+            nn.Linear(self.model_dim//2, self.model_dim//2)
+        )
+        self.project1  = nn.Sequential(
+            nn.Linear(self.model_dim, self.model_dim//2),
+            nn.GELU(),
+            nn.Linear(self.model_dim//2, self.model_dim//2)
+        )
+        self.output = nn.Linear(1, 1)
 
     def forward_branch(self, Xt:torch.Tensor) -> torch.Tensor:
-        Ht = self.processor(Xt, return_tensors='pt', do_resize=True)
-        Ht = self.encoder(**Ht.to(device))
-        Ht = Ht.last_hidden_state.mean(dim=1) # Alternative H = H.last_hidden_state[:,0,:] 
+        Ht = self.encoder(Xt)
+        Ht = Ht.last_hidden_state[:, 0, ...]
         return Ht
 
     def forward(self, X:torch.Tensor, Y:torch.Tensor=None) -> torch.Tensor:
         H0 = self.forward_branch(X[:,0])
+        H0 = self.project0(H0)
         H1 = self.forward_branch(X[:,1])
-        D = F.pairwise_distance(H0, H1, keepdim=True)
-        Y = self.output(D)
-        return D, Y
+        H1 = self.project1(H1)
+        D  = F.cosine_similarity(H0, H1, dim=1, eps=1e-8).unsqueeze(1)
+        Yh = self.output(D)
+        return D, Yh
 
 class SiameseModule(pl.LightningModule):
     
@@ -426,8 +431,8 @@ class SiameseModule(pl.LightningModule):
         return Y
     
     def training_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
-        X, Y  = batch
-        D, Yh = self.model(X)
+        X, Y   = batch
+        D, Yh  = self.model(X)
         loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
         loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
         train_loss = loss_S + self.weigh_contrast * loss_C
@@ -437,12 +442,12 @@ class SiameseModule(pl.LightningModule):
         self.accuracy_metric.update(probs, Y)
         self.auroc_metric.update(probs, Y)
         self.log('train_acc', self.accuracy_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
-        self.log('train_auroc', self.auroc_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
+        self.log('train_auroc', self.auroc_metric.compute(),  on_step=True, on_epoch=True, prog_bar=True)
         return train_loss
 
     def validation_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
-        X, Y  = batch
-        D, Yh = self.model(X)
+        X, Y   = batch
+        D, Yh  = self.model(X)
         loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
         loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
         val_loss = loss_S + self.weigh_contrast * loss_C
@@ -452,12 +457,12 @@ class SiameseModule(pl.LightningModule):
         self.accuracy_metric.update(probs, Y)
         self.auroc_metric.update(probs, Y)
         self.log('val_acc', self.accuracy_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
-        self.log('val_auroc', self.auroc_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
+        self.log('val_auroc', self.auroc_metric.compute(),  on_step=True, on_epoch=True, prog_bar=True)
         return val_loss
     
     def test_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
-        X, Y  = batch
-        D, Yh = self.model(X)
+        X, Y   = batch
+        D, Yh  = self.model(X)
         loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
         loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
         test_loss = loss_S + self.weigh_contrast * loss_C
@@ -467,7 +472,7 @@ class SiameseModule(pl.LightningModule):
         self.accuracy_metric.update(probs, Y)
         self.auroc_metric.update(probs, Y)
         self.log('test_acc', self.accuracy_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
-        self.log('test_auroc', self.auroc_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
+        self.log('test_auroc', self.auroc_metric.compute(),  on_step=True, on_epoch=True, prog_bar=True)
         return test_loss
 
     def configure_optimizers(self) -> dict:
@@ -490,10 +495,9 @@ class SiameseModule(pl.LightningModule):
 model_module = SiameseModule(
     model=SiameseModel(backbone=f'{paths.models}/checkpoint-9920'), 
     model_name='destruction_finetune_siamese', 
-    learning_rate=1e-4, 
+    learning_rate=1e-4,
     weight_decay=0.05,
-    weigh_contrast=0.0)
-"""
+    weigh_contrast=0.1) #! Should be tuned
 
 #%% TRAINS MODEL
 
@@ -520,8 +524,17 @@ early_stopping = callbacks.EarlyStopping(
     verbose=True
 )
 
-# Initialises trainer
-trainer1 = pl.Trainer(
+# Aligns output layer (1 unit)
+model_module.freeze_encoder()
+count_parameters(model_module)
+trainer = pl.Trainer(max_epochs=1, accelerator=device)
+trainer.fit(model=model_module, datamodule=data_module)
+
+# Fine-tunes full model
+model_module.unfreeze_encoder()
+count_parameters(model_module)
+
+trainer = pl.Trainer(
     max_epochs=100,
     accelerator=device,
     log_every_n_steps=1e3,
@@ -529,39 +542,14 @@ trainer1 = pl.Trainer(
     callbacks=[model_checkpoint, early_stopping],
     profiler=profilers.SimpleProfiler()
 )
-    
-# Optimisation step 1: Aligns output layer
-#model_module.freeze_encoder()
-trainer1.fit(
+
+trainer.fit(
     model=model_module, 
     datamodule=data_module,
     #ckpt_path=model_checkpoint.last_model_path if model_checkpoint.last_model_path else None,
 )
 
-trainer1.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage1.ckpt')
-"""
+# Saves model
+trainer.save_checkpoint(f'{paths.models}/{model_module.model_name}.ckpt')
 empty_cache(device=device)
-
-# Optimisation step 2: Fine-tunes full model
-model_module.unfreeze_encoder()
-
-# It’s a good idea to use a new Trainer so that the model's trainer attribute is updated.
-trainer2 = pl.Trainer(
-    max_epochs=100,
-    accelerator=device,
-    log_every_n_steps=1000,
-    logger=logger,
-    callbacks=[model_checkpoint, early_stopping],
-    profiler=profilers.SimpleProfiler()
-)
-
-trainer2.fit(
-    model=model_module, 
-    datamodule=data_module,
-    #ckpt_path=model_checkpoint.last_model_path if model_checkpoint.last_model_path else None,
-)
-
-trainer2.save_checkpoint(f'{paths.models}/{model_module.model_name}_stage2.ckpt')
-empty_cache(device=device)
-"""
 #%%
