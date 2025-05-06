@@ -440,6 +440,7 @@ class SiameseModule(pl.LightningModule):
         loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
         train_loss = loss_S + self.weigh_contrast * loss_C
         self.log('train_loss', train_loss, prog_bar=True)
+        
         # Metrics
         probs = torch.sigmoid(Yh)
         self.accuracy_metric.update(probs, Y)
