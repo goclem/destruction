@@ -32,7 +32,7 @@ args = parser.parse_args()
 
 params = argparse.Namespace(
     cities=args.cities,
-    batch_size=32,
+    batch_size=64,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
 
 #%% INITIALISES DATA MODULE
