@@ -6,7 +6,15 @@
 # Date: 2025-02-03
 # Version: 1.0
 
-python3 destruction_finetune_siamese.py --cities moschun #hostomel
+#python3 destruction_finetune_siamese.py --cities moschun #hostomel
+
+python3 destruction_finetune_siamese.py \
+    --mode train \
+    --cities moschun \
+    --max_epochs_align 1 \
+    --max_epochs_ft 75 \
+    --patience_ft 1 \
+
 #python3 destruction_finetune_siamese.py --cities hostomel irpin livoberezhnyi moschun rubizhne volnovakha aleppo daraa deirezzor hama homs idlib raqqa
 
 # Define an array of cities
