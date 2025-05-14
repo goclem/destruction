@@ -172,10 +172,21 @@ del X, Y, idx
 
 #%% INITIALISES MODEL MODULE
 
-def contrastive_loss(distance:torch.Tensor, label:torch.Tensor, margin:float) -> torch.Tensor:
-    loss = (1 - label) * torch.pow(distance, 2) + label * torch.pow(torch.clamp(margin - distance, min=0.0), 2)
-    return loss.mean()
+#def contrastive_loss(distance:torch.Tensor, label:torch.Tensor, margin:float) -> torch.Tensor:
+#    loss = (1 - label) * torch.pow(distance, 2) + label * torch.pow(torch.clamp(margin - distance, min=0.0), 2)
+#    return loss.mean()
 
+# New contrastive loss for cosine similarity
+def contrastive_loss(similarity: torch.Tensor, label: torch.Tensor, margin: float = 1) -> torch.Tensor:
+    # For similar pairs (label=0), push similarity towards 1 (or margin_similar)
+    # We want (margin_similar - similarity)^2 if similarity < margin_similar, else 0
+    # Or simply (1-similarity)^2
+    loss_similar = (1 - label) * torch.pow((1.0 - similarity)/2, 2)
+
+    # For dissimilar pairs (label=1), push similarity below margin_dissimilar
+    loss_dissimilar = label * torch.pow((similarity + 1.0)/2, 2)
+
+    return (loss_similar + loss_dissimilar).mean()
 ### Old Model - CNN based
 '''
 class DenseBlock(nn.Module):
