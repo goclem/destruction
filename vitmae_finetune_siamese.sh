@@ -6,8 +6,8 @@
 # Date: 2025-02-03
 # Version: 1.0
 
-#python3 destruction_finetune_siamese.py --cities moschun hostomel
-python3 destruction_finetune_siamese.py --cities hostomel irpin livoberezhnyi moschun rubizhne volnovakha aleppo daraa deirezzor hama homs idlib raqqa
+python3 destruction_finetune_siamese.py --cities moschun #hostomel
+#python3 destruction_finetune_siamese.py --cities hostomel irpin livoberezhnyi moschun rubizhne volnovakha aleppo daraa deirezzor hama homs idlib raqqa
 
 # Define an array of cities
 #cities=(hostomel aleppo homs)
