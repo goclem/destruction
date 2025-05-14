@@ -10,7 +10,7 @@
 
 python3 destruction_finetune_siamese.py \
     --mode train \
-    --cities moschun \
+    --cities hostomel irpin livoberezhnyi moschun rubizhne volnovakha aleppo daraa deirezzor hama homs idlib raqqa \
     --max_epochs_align 1 \
     --max_epochs_ft 75 \
     --patience_ft 1 \
