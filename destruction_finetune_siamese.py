@@ -49,13 +49,18 @@ parser.add_argument('--cities', nargs='+', type=str, default=['aleppo', 'moschun
 parser.add_argument('--run_name', type=str, default=None, help='Unique name/ID for this training run. If None for training, a timestamp will be generated.')
 parser.add_argument('--mode', type=str, default='train', choices=['train', 'eval_per_city'], help='Operation mode: train a new model or evaluate an existing one per city.')
 parser.add_argument('--checkpoint_to_eval', type=str, default=None, help='Path to .ckpt file for evaluation.')
-parser.add_argument('--training_cities_list', nargs='+', type=str, default=None, help='For eval_per_city mode: comma-separated list of cities used during training of the checkpoint (for overview logging).')
+parser.add_argument('--eval_cities', nargs='+', type=str, default=None, help='Cities on which we want to evaluate the model.')
+
+# hyperparameters
 parser.add_argument('--max_epochs_align', type=int, default=1, help='Max epochs for the alignment (frozen encoder) training stage.')
 parser.add_argument('--max_epochs_ft', type=int, default=100, help='Max epochs for the fine-tuning (unfrozen encoder) stage.')
 parser.add_argument('--patience_ft', type=int, default=5, help='Early stopping patience for the fine-tuning stage.') # Increased default
 parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate for the optimizer.')
 parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training and evaluation.')
-parser.add_argument('--weigh_contrast', type=float, default=0.1, help='Weight for the contrastive loss component.')
+parser.add_argument('--weight_contrast', type=float, default=0.1, help='Weight for the contrastive loss component.')
+parser.add_argument('--weight_decay', type=float, default=0.05, help='Penalizes large weights to prevent overfitting.')
+parser.add_argument('--margin_contrast', type=float, default=1, help='Value that explains how strict the contrastive loss is.')
+parser.add_argument('--backbone_model', type=str, default='checkpoint-9920', help='Name of the checkpoint of the pretrained encoder.')
 # Add any other hyperparameters you want to control via CLI
 
 args = parser.parse_args()
@@ -64,12 +69,21 @@ args = parser.parse_args()
 if args.mode == 'train' and args.run_name is None:
     args.run_name = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
 
-params = argparse.Namespace(
-    cities=args.cities,
-    batch_size=args.batch_size,
-    label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
-params_global = params
-BACKBONE_PATH = f'{paths.models}/checkpoint-9920'
+# Set default for eval_cities if not provided
+if args.eval_cities is None:
+    args.eval_cities = args.cities # Default to the training cities
+
+# Define your label_map (this is the one you want as default)
+default_label_map = {0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))}
+args.label_map = default_label_map # Now args.label_map exists
+
+BACKBONE_PATH = f'{paths.models}/{args.backbone_model}'
+
+# --- PRINT ALL ARGUMENTS ---
+print(f"\n--- Script Starting with the following arguments: ---\n")
+for arg_name, arg_value in vars(args).items():
+    print(f"{arg_name}: {arg_value}")
+print(f"\n-----------------------------------------------------\n")
 
 
 #%% --- FUNCTION DEFINITIONS (Place these early in the script) ---
@@ -77,7 +91,7 @@ BACKBONE_PATH = f'{paths.models}/checkpoint-9920'
 def update_experiment_overview_csv(overview_filepath: str, run_data_dict: dict):
     """Appends a new run's summary to the overview CSV file."""
     fieldnames = [
-        'run_id', 'training_start_timestamp', 'training_end_timestamp', 'training_cities',
+        'run_id', 'training_start_timestamp', 'training_best_checkpoint_timestamp', 'training_cities',
         'key_hyperparameters', 'best_val_metric_name', 'best_val_metric_value',
         'epoch_of_best_val_metric', 'train_metric_at_best_val_auroc', 'train_metric_at_best_val_loss',
         'best_checkpoint_path', 'evaluation_timestamp',
@@ -98,7 +112,6 @@ def update_experiment_overview_csv(overview_filepath: str, run_data_dict: dict):
 def run_per_city_evaluation(
     checkpoint_to_eval_path: str,
     current_args: argparse.Namespace,
-    global_params_obj: argparse.Namespace, # Explicitly pass the global params for label_map etc.
     global_paths_obj: object, # Explicitly pass the paths object
     base_model_name_str: str
 ):
@@ -106,9 +119,9 @@ def run_per_city_evaluation(
     Loads a trained model and evaluates it on the test set for each specified city,
     then updates the experiment overview CSV.
     """
-    print(f"--- Starting Evaluation for Checkpoint: {checkpoint_to_eval_path} ---")
-    cities_for_evaluation = current_args.cities if current_args.cities else global_params_obj.cities
-    print(f"Evaluating on cities: {cities_for_evaluation}")
+    print(f"\n--- Starting Evaluation for Checkpoint: {checkpoint_to_eval_path.split('/')[-1]} ---\n")
+    cities_for_evaluation = current_args.eval_cities 
+    print(f"\nEvaluating on cities: {cities_for_evaluation}\n")
 
     try:
         model_to_eval = SiameseModule.load_from_checkpoint(
@@ -116,8 +129,8 @@ def run_per_city_evaluation(
             model=SiameseModel(backbone=BACKBONE_PATH), # Pass nn.Module
             # Pass other __init__ args for SiameseModule if they are not in hparams and needed for instantiation
             learning_rate=current_args.learning_rate, # Example: if it's part of __init__ and not just for optimizer
-            weight_decay=0.05, # Example
-            weigh_contrast=current_args.weigh_contrast, # Example
+            weight_decay=current_args.weight_decay, # Example
+            weight_contrast=current_args.weight_contrast, # Example
             model_name=base_model_name_str # Ensure model_name is consistent
         )
     except Exception as e:
@@ -129,7 +142,7 @@ def run_per_city_evaluation(
 
     eval_trainer = pl.Trainer(accelerator=device, logger=False)
     all_city_results = {}
-
+    
     # data_module_for_eval = ZarrDataModule(...) # If you need to re-instantiate DataModule
     # data_module_for_eval.setup('test')
 
@@ -151,17 +164,18 @@ def run_per_city_evaluation(
                 print(f"Warning: Dataset for city {city_name} is empty. Skipping.")
                 all_city_results[city_name] = {"error": "empty dataset"}
                 continue
-
+                
             city_test_loader = ZarrDataLoader(
                 datafiles={city_name: city_test_datafile_spec},
                 datasets=[city_dataset],
-                label_map=global_params_obj.label_map,
+                label_map=current_args.label_map,
                 batch_size=current_args.batch_size, # Use batch_size from args
                 shuffle=False
             )
             city_metrics_list = eval_trainer.test(model=model_to_eval, dataloaders=city_test_loader, verbose=False)
             if city_metrics_list and isinstance(city_metrics_list, list) and len(city_metrics_list) > 0:
                 all_city_results[city_name] = city_metrics_list[0]
+                all_city_results[city_name]["test_set_size"] = len(city_dataset)
                 print(f"Metrics for {city_name}: {city_metrics_list[0]}")
             else:
                 print(f"Warning: No metrics returned from eval_trainer.test() for city {city_name}.")
@@ -171,7 +185,7 @@ def run_per_city_evaluation(
             all_city_results[city_name] = {"error": str(e)}
 
 
-    print(f"\n--- Overall Per-City Test Results (from checkpoint: {checkpoint_to_eval_path}) ---")
+    print(f"\n--- Overall Per-City Test Results (from checkpoint: {checkpoint_to_eval_path.split('/')[-1]}) ---")
     for city, metrics in all_city_results.items():
         print(f"City: {city}, Metrics: {metrics}")
 
@@ -185,11 +199,11 @@ def run_per_city_evaluation(
     epoch_of_best_val_overview = "N/A"
     train_auroc_at_best_val_overview = "N/A"
     train_loss_at_best_val_overview = "N/A"
-    training_start_ts_overview = "N/A"
-    training_end_ts_overview = "N/A"
+    training_start_ts_overview = datetime.datetime.strptime(current_args.run_name, '%Y%m%d-%H%M%S')
+    training_best_checkpoint_ts = "N/A"
     if os.path.exists(checkpoint_to_eval_path):
-        training_end_ts_overview = datetime.datetime.fromtimestamp(os.path.getmtime(checkpoint_to_eval_path)).strftime('%Y-%m-%d %H:%M:%S')
-
+        training_best_checkpoint_ts = datetime.datetime.fromtimestamp(os.path.getmtime(checkpoint_to_eval_path)).strftime('%Y-%m-%d %H:%M:%S')
+    
 
     path_parts = checkpoint_to_eval_path.split(os.sep)
     try:
@@ -206,9 +220,7 @@ def run_per_city_evaluation(
 
     # Use training_cities_list from current_args if it was explicitly passed for this eval call
     # This is important if eval is run manually and needs to reference the original training cities
-    if current_args.training_cities_list:
-         training_cities_overview_str = ",".join(current_args.training_cities_list)
-    elif os.path.exists(hparams_file):
+    if os.path.exists(hparams_file):
         with open(hparams_file, 'r') as f:
             hparams = yaml.safe_load(f)
             # Try to get 'cities' which should have been logged from args during training setup
@@ -217,14 +229,16 @@ def run_per_city_evaluation(
             
             key_hparams_to_log = {
                 k: hparams.get(k) for k in [
-                    'learning_rate', 'weight_decay', 'weigh_contrast', 'batch_size',
-                    'max_epochs_ft', 'patience_ft', 'max_epochs_align' # Add more as needed
+                    'learning_rate', 'weight_decay', 'weight_contrast', 'batch_size',
+                    'max_epochs_ft', 'patience_ft', 'max_epochs_align', 'margin_contrast', 'backbone_model', 'label_map' # Add more as needed
+
                 ] if k in hparams
             }
             key_hyperparams_overview_json = json.dumps(key_hparams_to_log)
             # If run_name was an arg and logged in hparams, it can be a fallback
             if 'run_name' in hparams and run_id_for_overview == "N/A":
                 run_id_for_overview = hparams['run_name']
+    
 
     if os.path.exists(metrics_file):
         try:
@@ -277,7 +291,7 @@ def run_per_city_evaluation(
     overview_data = {
         'run_id': run_id_for_overview,
         'training_start_timestamp': training_start_ts_overview, # Might be N/A if not easily found
-        'training_end_timestamp': training_end_ts_overview,
+        'training_best_checkpoint_timestamp': training_best_checkpoint_ts,
         'training_cities': training_cities_overview_str,
         'key_hyperparameters': key_hyperparams_overview_json,
         'best_val_metric_name': best_val_metric_name_overview,
@@ -386,9 +400,9 @@ class ZarrDataModule(pl.LightningDataModule):
         self.shuffle = shuffle
 
     def setup(self, stage:str=None):
-        self.train_datasets = [ZarrDataset(**self.train_datafiles[city]) for city in params.cities]
-        self.valid_datasets = [ZarrDataset(**self.valid_datafiles[city]) for city in params.cities]
-        self.test_datasets  = [ZarrDataset(**self.test_datafiles[city])  for city in params.cities]
+        self.train_datasets = [ZarrDataset(**self.train_datafiles[city]) for city in args.cities]
+        self.valid_datasets = [ZarrDataset(**self.valid_datafiles[city]) for city in args.cities]
+        self.test_datasets  = [ZarrDataset(**self.test_datafiles[city])  for city in args.cities]
 
     def train_dataloader(self):
         return ZarrDataLoader(datafiles=self.train_datafiles, datasets=self.train_datasets, label_map=self.label_map, batch_size=self.batch_size, shuffle=self.shuffle)
@@ -460,7 +474,7 @@ class SiameseModel(nn.Module):
 
 class SiameseModule(pl.LightningModule):
     
-    def __init__(self, model:str, model_name:str, learning_rate:float=1e-4, weight_decay:float=0.05, weigh_contrast:float=0.0, margin_contrast=1.0):
+    def __init__(self, model:str, model_name:str, learning_rate:float=1e-4, weight_decay:float=0.05, weight_contrast:float=0.0, margin_contrast=1.0):
         
         super().__init__()
         self.save_hyperparameters()
@@ -470,8 +484,8 @@ class SiameseModule(pl.LightningModule):
         self.sigmoid_loss    = torchvision.ops.sigmoid_focal_loss
         self.learning_rate   = learning_rate
         self.weight_decay    = weight_decay
-        self.weigh_contrast  = weigh_contrast
-        self.margin_contrast = 1.0
+        self.weight_contrast  = weight_contrast
+        self.margin_contrast = margin_contrast
         self.trainable       = None
         self.accuracy_metric = classification.BinaryAccuracy()
         self.auroc_metric    = classification.BinaryAUROC()
@@ -497,7 +511,7 @@ class SiameseModule(pl.LightningModule):
         D, Yh  = self.model(X)
         loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
         loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
-        train_loss = loss_S + self.weigh_contrast * loss_C
+        train_loss = loss_S + self.weight_contrast * loss_C
         self.log('train_loss', train_loss, prog_bar=True)
         
         # Metrics
@@ -513,7 +527,7 @@ class SiameseModule(pl.LightningModule):
         D, Yh  = self.model(X)
         loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
         loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
-        val_loss = loss_S + self.weigh_contrast * loss_C
+        val_loss = loss_S + self.weight_contrast * loss_C
         self.log('val_loss', val_loss, prog_bar=True)
         # Metrics
         probs = torch.sigmoid(Yh)
@@ -528,7 +542,7 @@ class SiameseModule(pl.LightningModule):
         D, Yh  = self.model(X)
         loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
         loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
-        test_loss = loss_S + self.weigh_contrast * loss_C
+        test_loss = loss_S + self.weight_contrast * loss_C
         self.log('test_loss', test_loss, prog_bar=True)
         # Metrics
         probs = torch.sigmoid(Yh)
@@ -558,14 +572,14 @@ class SiameseModule(pl.LightningModule):
 #%% INITIALISE DATA AND MODEL (Needed for both modes) ---
 
 # Initialises datasets
-train_datafiles = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_train_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_train_balanced.zarr') for city in params.cities]))
-valid_datafiles = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_valid_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_valid_balanced.zarr') for city in params.cities]))
-test_datafiles  = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_test_balanced.zarr',  labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_test_balanced.zarr')  for city in params.cities]))
+train_datafiles = dict(zip(args.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_train_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_train_balanced.zarr') for city in args.cities]))
+valid_datafiles = dict(zip(args.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_valid_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_valid_balanced.zarr') for city in args.cities]))
+test_datafiles  = dict(zip(args.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_test_balanced.zarr',  labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_test_balanced.zarr')  for city in args.cities]))
 data_module = ZarrDataModule(train_datafiles=train_datafiles, 
                              valid_datafiles=valid_datafiles, 
                              test_datafiles=test_datafiles, 
-                             batch_size=params.batch_size, 
-                             label_map=params.label_map, 
+                             batch_size=args.batch_size, 
+                             label_map=args.label_map, 
                              shuffle=True)
 del train_datafiles, valid_datafiles, test_datafiles
 
@@ -579,9 +593,9 @@ model_module = SiameseModule(
     model= siamese_nn_model, 
     model_name='destruction_finetune_siamese', 
     learning_rate=args.learning_rate,
-    weight_decay=0.05,
-    weigh_contrast=args.weigh_contrast, #! Should be tuned
-    margin_contrast=1.0) 
+    weight_decay=args.weight_decay,
+    weight_contrast=args.weight_contrast, #! Should be tuned
+    margin_contrast=args.margin_contrast) 
 
 
     
@@ -618,11 +632,28 @@ if args.mode == 'train':
     )
 
     # Log command-line arguments for this run
+    
     hparams_for_logging = vars(args).copy()
-    # Add any other important parameters not in args, e.g. from params_global
+    if 'label_map' in hparams_for_logging and isinstance(hparams_for_logging['label_map'], dict):
+        serializable_label_map = {}
+        for k, v_obj in hparams_for_logging['label_map'].items():
+            if isinstance(v_obj, torch.Tensor):
+                if v_obj.isnan().any():
+                    serializable_label_map[k] = "NaN" # Represent as string "NaN"
+                elif v_obj.numel() == 1:
+                    serializable_label_map[k] = v_obj.item()
+                else:
+                    serializable_label_map[k] = str(v_obj.tolist())
+            else:
+                serializable_label_map[k] = v_obj
+        hparams_for_logging['label_map'] = serializable_label_map
+    
+    # Add any other important parameters not in args, e.g. fromparams
     hparams_for_logging['training_start_actual_time'] = training_start_actual_time
+    # This is the preferred and modern way in PyTorch Lightning.
     if hasattr(fine_tune_logger, 'log_hyperparams'):
         fine_tune_logger.log_hyperparams(hparams_for_logging)
+    # Fallback for older versions of PyTorch Lightning
     elif hasattr(model_module, 'hparams'): # Fallback
             model_module.hparams.update(hparams_for_logging)
 
@@ -662,6 +693,7 @@ if args.mode == 'train':
     )
     print(f"\n--- Fine-Tuning Stage Complete for Run ID: {args.run_name} ---\n")
 
+    # Identifying checkpoint of the best run
     best_ft_checkpoint_for_eval = None
     last_ckpt_in_run_dir = os.path.join(fine_tune_checkpoint_dir, "last.ckpt")
 
@@ -679,7 +711,7 @@ if args.mode == 'train':
     if 'empty_cache' in globals() and callable(globals()['empty_cache']): empty_cache(device=device)
 
     if best_ft_checkpoint_for_eval:
-        print(f"\n--- Automatically proceeding to per-city evaluation for checkpoint: {best_ft_checkpoint_for_eval} ---\n")
+        print(f"\n--- Automatically proceeding to per-city evaluation for checkpoint: {best_ft_checkpoint_for_eval.split('/')[-1]} ---\n")
         
         # Prepare args for evaluation function
         # Note: current_args.cities will be used by run_per_city_evaluation to iterate for testing
@@ -693,7 +725,6 @@ if args.mode == 'train':
         run_per_city_evaluation(
             checkpoint_to_eval_path=best_ft_checkpoint_for_eval,
             current_args=argparse.Namespace(**eval_func_args), # Pass all current args + specific overrides
-            global_params_obj=params_global, # Your global params_global object
             global_paths_obj=paths,   # Your global paths object
             base_model_name_str=model_module.model_name
         )
@@ -709,7 +740,6 @@ elif args.mode == 'eval_per_city':
     run_per_city_evaluation(
         checkpoint_to_eval_path=args.checkpoint_to_eval,
         current_args=args, # The command-line args passed for evaluation
-        global_params_obj=params_global,
         global_paths_obj=paths,
         base_model_name_str=model_module.model_name # Assuming model_module is instantiated globally
     )
