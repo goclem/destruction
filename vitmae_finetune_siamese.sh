@@ -8,9 +8,9 @@
 
 #python3 destruction_finetune_siamese.py --cities moschun #hostomel
 
-    #--cities hostomel irpin livoberezhnyi moschun rubizhne volnovakha aleppo daraa deirezzor hama homs idlib raqqa \
+    #--cities moschun \
 python3 destruction_finetune_siamese.py \
-    --cities moschun \
+    --cities hostomel irpin livoberezhnyi moschun rubizhne volnovakha aleppo daraa deirezzor hama homs idlib raqqa \
     --mode train \
     --max_epochs_align 1 \
     --max_epochs_ft 100 \
