@@ -29,9 +29,6 @@ from torcheval import metrics
 
 #%% PATH UTILITIES
 
-seed = 42 # Or any integer
-np.random.seed(seed)
-torch.manual_seed(seed)
 
 home  = os.path.expanduser('~')
 paths = argparse.Namespace(

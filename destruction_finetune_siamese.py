@@ -29,6 +29,7 @@ from destruction_utilities import *
 from pytorch_lightning import callbacks, loggers, profilers
 from torch import optim
 from torchmetrics import classification
+#%%
 
 seed = 42 # Or any integer
 np.random.seed(seed)
@@ -54,7 +55,7 @@ parser.add_argument('--eval_cities', nargs='+', type=str, default=None, help='Ci
 # hyperparameters
 parser.add_argument('--max_epochs_align', type=int, default=1, help='Max epochs for the alignment (frozen encoder) training stage.')
 parser.add_argument('--max_epochs_ft', type=int, default=100, help='Max epochs for the fine-tuning (unfrozen encoder) stage.')
-parser.add_argument('--patience_ft', type=int, default=5, help='Early stopping patience for the fine-tuning stage.') # Increased default
+parser.add_argument('--patience_ft', type=int, default=2, help='Early stopping patience for the fine-tuning stage.') # Increased default
 parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate for the optimizer.')
 parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training and evaluation.')
 parser.add_argument('--weight_contrast', type=float, default=0.1, help='Weight for the contrastive loss component.')
@@ -88,25 +89,65 @@ print(f"\n-----------------------------------------------------\n")
 
 #%% --- FUNCTION DEFINITIONS (Place these early in the script) ---
 
-def update_experiment_overview_csv(overview_filepath: str, run_data_dict: dict):
+def update_experiment_overview_csv(overview_filepath: str, dict_list):
     """Appends a new run's summary to the overview CSV file."""
-    fieldnames = [
-        'run_id', 'training_start_timestamp', 'training_best_checkpoint_timestamp', 'training_cities',
-        'key_hyperparameters', 'best_val_metric_name', 'best_val_metric_value',
-        'epoch_of_best_val_metric', 'train_metric_at_best_val_auroc', 'train_metric_at_best_val_loss',
-        'best_checkpoint_path', 'evaluation_timestamp',
-        'per_city_test_aurocs', 'average_test_auroc'
+    fieldnames = np.concatenate([list(dict.keys()) for dict in dict_list])
+    
+    value_lists = []
+    for value_list in [list(dict.values()) for dict in dict_list]:
+        value_lists.append([str(val) for val in value_list]) 
+    fieldvalues = np.concatenate(value_lists)  
+      
+    save_dict = {}
+    for i in range(len(fieldvalues)):
+        save_dict[fieldnames[i]] = fieldvalues[i]
+      
+    ordered_columns = [
+    'checkpoint_to_eval',
+    'epoch',
+    'run_name',
+    'mode',
+    'training_start_actual_time',
+    'evaluation_timestamp',
+    'cities',
+    'test_auroc_epoch',
+    'test_acc_epoch',
+    'test_loss',
+    'val_auroc_epoch',
+    'val_acc_epoch',
+    'val_loss',
+    'train_auroc_epoch',
+    'train_acc_epoch',
+    'per_city_test_aurocs',
+    'average_test_auroc',
+    'per_city_length_test',
+    'backbone_model',
+    'learning_rate',
+    'batch_size',
+    'weight_decay',
+    'margin_contrast',
+    'weight_contrast',
+    'max_epochs_align',
+    'max_epochs_ft',
+    'patience_ft',
+    'label_map'
     ]
+      
+    subset_dict = {}
+    for col in ordered_columns:
+        subset_dict[col] = save_dict[col]
+    
     file_exists = os.path.isfile(overview_filepath)
     try:
         with open(overview_filepath, 'a', newline='') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames, extrasaction='ignore')
+            writer = csv.DictWriter(csvfile, fieldnames=ordered_columns, extrasaction='ignore')
             if not file_exists or os.path.getsize(overview_filepath) == 0: # Check if file is empty too
                 writer.writeheader()
-            writer.writerow(run_data_dict)
+            writer.writerow(subset_dict)
         print(f"Run summary appended to: {overview_filepath}")
     except IOError as e:
         print(f"Error writing to overview CSV {overview_filepath}: {e}")
+
 
 
 def run_per_city_evaluation(
@@ -116,8 +157,7 @@ def run_per_city_evaluation(
     base_model_name_str: str
 ):
     """
-    Loads a trained model and evaluates it on the test set for each specified city,
-    then updates the experiment overview CSV.
+    Loads a trained model and evaluates it on the test set for each specified city
     """
     print(f"\n--- Starting Evaluation for Checkpoint: {checkpoint_to_eval_path.split('/')[-1]} ---\n")
     cities_for_evaluation = current_args.eval_cities 
@@ -142,9 +182,7 @@ def run_per_city_evaluation(
 
     eval_trainer = pl.Trainer(accelerator=device, logger=False)
     all_city_results = {}
-    
-    # data_module_for_eval = ZarrDataModule(...) # If you need to re-instantiate DataModule
-    # data_module_for_eval.setup('test')
+    all_city_length = {}
 
     for city_name in cities_for_evaluation:
         print(f"--- Evaluating city: {city_name} ---")
@@ -164,7 +202,9 @@ def run_per_city_evaluation(
                 print(f"Warning: Dataset for city {city_name} is empty. Skipping.")
                 all_city_results[city_name] = {"error": "empty dataset"}
                 continue
-                
+            
+            all_city_length[city_name] = len(city_dataset)
+            
             city_test_loader = ZarrDataLoader(
                 datafiles={city_name: city_test_datafile_spec},
                 datasets=[city_dataset],
@@ -187,127 +227,11 @@ def run_per_city_evaluation(
 
     print(f"\n--- Overall Per-City Test Results (from checkpoint: {checkpoint_to_eval_path.split('/')[-1]}) ---")
     for city, metrics in all_city_results.items():
-        print(f"City: {city}, Metrics: {metrics}")
+        print(f"City: {city}, Metrics: {metrics}, Size test set: {all_city_length[city]}")
 
-    # --- Gather info for overview CSV ---
-    run_id_for_overview = "N/A"
-    model_name_overview = base_model_name_str
-    training_cities_overview_str = "N/A"
-    key_hyperparams_overview_json = "{}"
-    best_val_metric_name_overview = "N/A"
-    best_val_metric_value_overview = "N/A"
-    epoch_of_best_val_overview = "N/A"
-    train_auroc_at_best_val_overview = "N/A"
-    train_loss_at_best_val_overview = "N/A"
-    training_start_ts_overview = datetime.datetime.strptime(current_args.run_name, '%Y%m%d-%H%M%S')
-    training_best_checkpoint_ts = "N/A"
-    if os.path.exists(checkpoint_to_eval_path):
-        training_best_checkpoint_ts = datetime.datetime.fromtimestamp(os.path.getmtime(checkpoint_to_eval_path)).strftime('%Y-%m-%d %H:%M:%S')
+    return all_city_results, all_city_length
     
 
-    path_parts = checkpoint_to_eval_path.split(os.sep)
-    try:
-        checkpoints_idx = path_parts.index("checkpoints")
-        run_id_for_overview = path_parts[checkpoints_idx - 1]
-        model_name_overview = path_parts[checkpoints_idx - 2]
-        run_log_dir_for_csv = os.path.join(f'{global_paths_obj.models}/logs', model_name_overview, run_id_for_overview)
-    except (ValueError, IndexError):
-        print(f"Warning: Could not parse run_id/model_name from checkpoint path: {checkpoint_to_eval_path}")
-        run_log_dir_for_csv = os.path.dirname(os.path.dirname(checkpoint_to_eval_path)) # Fallback
-
-    hparams_file = os.path.join(run_log_dir_for_csv, 'hparams.yaml')
-    metrics_file = os.path.join(run_log_dir_for_csv, 'metrics.csv')
-
-    # Use training_cities_list from current_args if it was explicitly passed for this eval call
-    # This is important if eval is run manually and needs to reference the original training cities
-    if os.path.exists(hparams_file):
-        with open(hparams_file, 'r') as f:
-            hparams = yaml.safe_load(f)
-            # Try to get 'cities' which should have been logged from args during training setup
-            if 'cities' in hparams and isinstance(hparams.get('cities'), list):
-                 training_cities_overview_str = ",".join(hparams['cities'])
-            
-            key_hparams_to_log = {
-                k: hparams.get(k) for k in [
-                    'learning_rate', 'weight_decay', 'weight_contrast', 'batch_size',
-                    'max_epochs_ft', 'patience_ft', 'max_epochs_align', 'margin_contrast', 'backbone_model', 'label_map' # Add more as needed
-
-                ] if k in hparams
-            }
-            key_hyperparams_overview_json = json.dumps(key_hparams_to_log)
-            # If run_name was an arg and logged in hparams, it can be a fallback
-            if 'run_name' in hparams and run_id_for_overview == "N/A":
-                run_id_for_overview = hparams['run_name']
-    
-
-    if os.path.exists(metrics_file):
-        try:
-            metrics_df = pd.read_csv(metrics_file)
-            metrics_df.dropna(subset=['epoch'], inplace=True)
-            metrics_df['epoch'] = metrics_df['epoch'].astype(int)
-
-            # This MUST match the 'monitor' in ModelCheckpoint for the fine-tuning stage
-            monitored_val_metric_col = 'val_auroc_epoch' 
-            # These MUST match what's logged by SiameseModule.training_step (on_epoch=True)
-            train_auroc_col = 'train_auroc_epoch' 
-            train_loss_col = 'train_loss_epoch'   
-
-            if monitored_val_metric_col in metrics_df.columns:
-                valid_metrics_df = metrics_df.dropna(subset=[monitored_val_metric_col])
-                if not valid_metrics_df.empty:
-                    best_epoch_idx = valid_metrics_df[monitored_val_metric_col].idxmax() # Assuming mode='max'
-                    best_row = valid_metrics_df.loc[best_epoch_idx]
-
-                    best_val_metric_name_overview = monitored_val_metric_col
-                    best_val_metric_value_overview = best_row[monitored_val_metric_col]
-                    epoch_of_best_val_overview = int(best_row['epoch'])
-                    
-                    if train_auroc_col in best_row: train_auroc_at_best_val_overview = best_row[train_auroc_col]
-                    if train_loss_col in best_row: train_loss_at_best_val_overview = best_row[train_loss_col]
-                    
-                    # Timestamps: PTL CSVLogger doesn't add per-row timestamps by default.
-                    # 'wall_time' or 'time_elapsed' might be there.
-                    # For simplicity, using file modification times or current time.
-                    # training_start_ts_overview can be approximated by first entry if wall_time exists
-                    if 'wall_time' in metrics_df.columns and not metrics_df.empty:
-                        first_log_time_sec = metrics_df['wall_time'].iloc[0]
-                        # This is tricky; wall_time is often relative.
-                        # A simpler approach is to log training start time explicitly when training begins.
-                        # For now, we use checkpoint modification time for training_end_ts_overview.
-                        pass
-
-
-        except Exception as e:
-            print(f"Warning: Could not read/parse fine-tuning metrics from {metrics_file}: {e}")
-            
-    per_city_test_aurocs_dict = {
-        city: results.get('test_auroc_epoch', results.get('test_auroc', "N/A")) # Ensure key matches test_step log
-        for city, results in all_city_results.items() if "error" not in results
-    }
-    per_city_test_aurocs_json = json.dumps(per_city_test_aurocs_dict)
-    auroc_values = [val for val in per_city_test_aurocs_dict.values() if isinstance(val, (float, int))]
-    average_test_auroc_overview = sum(auroc_values) / len(auroc_values) if auroc_values else "N/A"
-
-    overview_data = {
-        'run_id': run_id_for_overview,
-        'training_start_timestamp': training_start_ts_overview, # Might be N/A if not easily found
-        'training_best_checkpoint_timestamp': training_best_checkpoint_ts,
-        'training_cities': training_cities_overview_str,
-        'key_hyperparameters': key_hyperparams_overview_json,
-        'best_val_metric_name': best_val_metric_name_overview,
-        'best_val_metric_value': f"{best_val_metric_value_overview:.4f}" if isinstance(best_val_metric_value_overview, float) else best_val_metric_value_overview,
-        'epoch_of_best_val_metric': epoch_of_best_val_overview,
-        'train_metric_at_best_val_auroc': f"{train_auroc_at_best_val_overview:.4f}" if isinstance(train_auroc_at_best_val_overview, float) else train_auroc_at_best_val_overview,
-        'train_metric_at_best_val_loss': f"{train_loss_at_best_val_overview:.4f}" if isinstance(train_loss_at_best_val_overview, float) else train_loss_at_best_val_overview,
-        'best_checkpoint_path': checkpoint_to_eval_path,
-        'evaluation_timestamp': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'per_city_test_aurocs': per_city_test_aurocs_json,
-        'average_test_auroc': f"{average_test_auroc_overview:.4f}" if isinstance(average_test_auroc_overview, float) else average_test_auroc_overview,
-    }
-    overview_csv_filepath = os.path.join(f'{global_paths_obj.models}/logs', "experiment_overview.csv")
-    update_experiment_overview_csv(overview_csv_filepath, overview_data)
-
-    if 'empty_cache' in globals() and callable(globals()['empty_cache']): empty_cache(device)
 
 
 
@@ -481,7 +405,7 @@ class SiameseModule(pl.LightningModule):
         self.model = model
         self.model_name      = model_name
         self.contrast_loss   = contrastive_loss
-        self.sigmoid_loss    = torchvision.ops.sigmoid_focal_loss
+        self.sigmoid_loss    = torchvision.ops.sigmoid_focal_loss # nn.crossentropy
         self.learning_rate   = learning_rate
         self.weight_decay    = weight_decay
         self.weight_contrast  = weight_contrast
@@ -583,7 +507,6 @@ data_module = ZarrDataModule(train_datafiles=train_datafiles,
                              shuffle=True)
 del train_datafiles, valid_datafiles, test_datafiles
 
-
 # Initialises model
 if not os.path.exists(BACKBONE_PATH):
     print(f"Warning: Backbone path {BACKBONE_PATH} does not exist. Ensure it's correct.")
@@ -602,6 +525,7 @@ model_module = SiameseModule(
 #%% MAIN SCRIPT LOGIC DISPATCHER
     # --- MAIN SCRIPT LOGIC ---
 if args.mode == 'train':
+            
     print(f"\n--- Starting Training Mode for Run ID: {args.run_name} ---\n")
     print(f"Training with cities: {args.cities}")
     training_start_actual_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S') # Log actual start
@@ -631,9 +555,13 @@ if args.mode == 'train':
         version=args.run_name
     )
 
-    # Log command-line arguments for this run
+    # -----------------------------------------------------------------------------------------------
+    # Logging of hyperparameters in hparams.yaml 
     
+    # Log all parameters in args
     hparams_for_logging = vars(args).copy()
+    
+    # Properly save the label map
     if 'label_map' in hparams_for_logging and isinstance(hparams_for_logging['label_map'], dict):
         serializable_label_map = {}
         for k, v_obj in hparams_for_logging['label_map'].items():
@@ -648,16 +576,19 @@ if args.mode == 'train':
                 serializable_label_map[k] = v_obj
         hparams_for_logging['label_map'] = serializable_label_map
     
-    # Add any other important parameters not in args, e.g. fromparams
+    # Add any other important parameters not in args, e.g. when the training was started
     hparams_for_logging['training_start_actual_time'] = training_start_actual_time
-    # This is the preferred and modern way in PyTorch Lightning.
+    
+    # Save the hyperparameters 
     if hasattr(fine_tune_logger, 'log_hyperparams'):
         fine_tune_logger.log_hyperparams(hparams_for_logging)
     # Fallback for older versions of PyTorch Lightning
     elif hasattr(model_module, 'hparams'): # Fallback
             model_module.hparams.update(hparams_for_logging)
 
-
+    # -----------------------------------------------------------------------------------------------
+    # Logging of checkpoints 
+    
     fine_tune_checkpoint_dir = os.path.join(fine_tune_logger.log_dir, 'checkpoints')
     os.makedirs(fine_tune_checkpoint_dir, exist_ok=True)
 
@@ -669,9 +600,19 @@ if args.mode == 'train':
         save_top_k=1,
         save_last=True
     )
+    
+    
+    # -----------------------------------------------------------------------------------------------
+    # Defining the early stopping
+     
     fine_tune_early_stopping = callbacks.EarlyStopping(
         monitor='val_loss', mode='min', patience=args.patience_ft, verbose=True
     )
+    
+    
+    # -----------------------------------------------------------------------------------------------
+    # Start training
+     
     trainer_callbacks_list = [fine_tune_model_checkpoint, fine_tune_early_stopping]
 
     fine_tune_trainer = pl.Trainer(
@@ -683,8 +624,6 @@ if args.mode == 'train':
     )
     
     initial_ft_ckpt_path = None # For a new run_name, usually start fresh fine-tuning
-    # Add logic here if you want to allow resuming specific --run_name fine-tuning sessions based on last.ckpt
-
     print(f"\n Starting fine-tuning. Initial FT checkpoint: {initial_ft_ckpt_path if initial_ft_ckpt_path else 'None (after alignment)'} \n")
     fine_tune_trainer.fit(
         model=model_module,
@@ -693,7 +632,7 @@ if args.mode == 'train':
     )
     print(f"\n--- Fine-Tuning Stage Complete for Run ID: {args.run_name} ---\n")
 
-    # Identifying checkpoint of the best run
+    # Identifying if the checkpoint of the best/last run was created
     best_ft_checkpoint_for_eval = None
     last_ckpt_in_run_dir = os.path.join(fine_tune_checkpoint_dir, "last.ckpt")
 
@@ -710,34 +649,47 @@ if args.mode == 'train':
 
     if 'empty_cache' in globals() and callable(globals()['empty_cache']): empty_cache(device=device)
 
+
     if best_ft_checkpoint_for_eval:
+        # -----------------------------------------------------------------------------------------------
+        # Evaluate the model with the test set of the entire data
+        print(f"\n--- Test Set Evaluation Results for checkpoint: {best_ft_checkpoint_for_eval.split('/')[-1]} ---\n")
+        test_results = fine_tune_trainer.test(model=model_module,
+                                              datamodule=data_module,
+                                                   ckpt_path=best_ft_checkpoint_for_eval)
+
+        if test_results: # trainer.test() returns a list of dictionaries
+            for result_dict in test_results:
+                for key, value in result_dict.items():
+                    print(f"{key}: {value:.4f}") # Print test metrics
+        else:
+            print("No test results returned. Ensure metrics are logged in test_step of your LightningModule.")
+
+
+        # -----------------------------------------------------------------------------------------------
+        # Per city evaluation if a checkpoint of the model was saved
+
         print(f"\n--- Automatically proceeding to per-city evaluation for checkpoint: {best_ft_checkpoint_for_eval.split('/')[-1]} ---\n")
         
-        # Prepare args for evaluation function
-        # Note: current_args.cities will be used by run_per_city_evaluation to iterate for testing
-        # We need to pass the original training cities for logging purposes to the overview CSV
-        eval_func_args = args.__dict__.copy()
-        eval_func_args['checkpoint_to_eval'] = best_ft_checkpoint_for_eval
-        # This 'training_cities_list' in eval_func_args will be used by run_per_city_evaluation
-        # to know which cities were part of *this current training run*.
-        eval_func_args['training_cities_list'] = args.cities 
+        # Prepare args for evaluation function by adding the best checkpoint of the model
+        args.checkpoint_to_eval = best_ft_checkpoint_for_eval
         
-        run_per_city_evaluation(
-            checkpoint_to_eval_path=best_ft_checkpoint_for_eval,
-            current_args=argparse.Namespace(**eval_func_args), # Pass all current args + specific overrides
-            global_paths_obj=paths,   # Your global paths object
+        all_city_results, all_city_length = run_per_city_evaluation(
+            checkpoint_to_eval_path=args.checkpoint_to_eval,
+            current_args=args,
+            global_paths_obj=paths,   # global paths object
             base_model_name_str=model_module.model_name
         )
     else:
         print("\nSkipping automatic per-city evaluation as no valid checkpoint was identified.")
 
+# -----------------------------------------------------------------------------------------------
+# Directly run per city evaluation
 elif args.mode == 'eval_per_city':
     if not args.checkpoint_to_eval or not os.path.exists(args.checkpoint_to_eval):
         raise ValueError("Must provide a valid --checkpoint_to_eval path for 'eval_per_city' mode when run manually.")
     
-    # When running eval_per_city manually, ensure --training_cities_list is provided if you want it in the CSV
-    # The --cities arg will be used for *which cities to test on*.
-    run_per_city_evaluation(
+    all_city_results, all_city_length = run_per_city_evaluation(
         checkpoint_to_eval_path=args.checkpoint_to_eval,
         current_args=args, # The command-line args passed for evaluation
         global_paths_obj=paths,
@@ -746,3 +698,93 @@ elif args.mode == 'eval_per_city':
 else:
     print(f"Unknown mode: {args.mode}. Choose 'train' or 'eval_per_city'.")
 
+
+# -----------------------------------------------------------------------------------------------
+# Gather information for the overview CSV
+#%%
+# --- Gather info for overview CSV ---
+'''run_id_for_overview = "N/A"
+model_name_overview = "N/A" #model_module.model_name
+training_cities_overview_str = "N/A"
+key_hyperparams_overview_json = "{}"
+best_val_metric_value_overview = "N/A"
+epoch_of_best_val_overview = "N/A"
+train_auroc_at_best_val_overview = "N/A"
+train_loss_at_best_val_overview = "N/A"
+training_start_ts_overview = "N/A" #datetime.datetime.strptime(args.run_name, '%Y%m%d-%H%M%S')
+training_best_checkpoint_ts = "N/A"'''
+#if os.path.exists(args.checkpoint_to_eval):
+#    training_best_checkpoint_ts = datetime.datetime.fromtimestamp(os.path.getmtime(args.checkpoint_to_eval)).strftime('%Y-%m-%d %H:%M:%S')
+
+
+# Open hyperparameter and metrics files
+path_parts = args.checkpoint_to_eval.split(os.sep)
+try:
+    checkpoints_idx = path_parts.index("checkpoints")
+    run_id_for_overview = path_parts[checkpoints_idx - 1]
+    model_name_overview = path_parts[checkpoints_idx - 2]
+    run_log_dir_for_csv = os.path.join(f'{paths.models}/logs', model_name_overview, run_id_for_overview)
+except (ValueError, IndexError):
+    print(f"Warning: Could not parse run_id/model_name from checkpoint path: {args.checkpoint_to_eval}")
+    run_log_dir_for_csv = os.path.dirname(os.path.dirname(args.checkpoint_to_eval)) # Fallback
+
+hparams_file = os.path.join(run_log_dir_for_csv, 'hparams.yaml')
+metrics_file = os.path.join(run_log_dir_for_csv, 'metrics.csv')
+
+#%%
+# This is important if eval is run manually and needs to reference the original training cities
+if os.path.exists(hparams_file):
+    with open(hparams_file, 'r') as f:
+        hparams = yaml.unsafe_load(f)
+
+#%%
+if os.path.exists(metrics_file):
+    try:
+        metrics_df = pd.read_csv(metrics_file)
+
+        # Extract the validation metrics for the best epoch
+        best_validation_df = metrics_df.iloc[[metrics_df["val_auroc_epoch"].idxmax()]]
+        best_validation_df = best_validation_df[["epoch", "val_acc_epoch", "val_auroc_epoch", "val_loss"]].reset_index(drop=True)
+        
+        # Extract the train metrics for the best epoch
+        best_train_df = metrics_df.loc[(metrics_df["epoch"] == best_validation_df["epoch"].values[0]) & (~metrics_df["train_auroc_epoch"].isna()), ["train_acc_epoch", "train_auroc_epoch"]].reset_index(drop=True)
+        
+        # Extract the test metrics for the best epoch
+        test_df = metrics_df.loc[~metrics_df["test_acc_epoch"].isna(), ["test_acc_epoch", "test_auroc_epoch", "test_loss"]].reset_index(drop=True)
+        
+        # Join extracted metrics        
+        extracted_metrics_df = pd.concat([best_validation_df, best_train_df, test_df], axis=1)
+        extracted_metrics_df["epoch"] = extracted_metrics_df["epoch"].astype(int)
+        
+        extracted_metrics_dict = {}
+        for col in extracted_metrics_df.columns:
+            extracted_metrics_dict[col] = extracted_metrics_df[col].values[0]
+        
+    except Exception as e:
+        print(f"Warning: Could not read/select fine-tuning metrics from {metrics_file}: {e}")
+        
+#%%        
+per_city_test_aurocs_dict = {
+    city: results.get('test_auroc_epoch', results.get('test_auroc', "N/A")) # Ensure key matches test_step log
+    for city, results in all_city_results.items() if "error" not in results
+}
+per_city_test_aurocs_json = json.dumps(per_city_test_aurocs_dict)
+auroc_values = [val for val in per_city_test_aurocs_dict.values() if isinstance(val, (float, int))]
+average_test_auroc_overview = sum(auroc_values) / len(auroc_values) if auroc_values else "N/A"
+
+per_city_eval_data = {
+    'checkpoint_to_eval': args.checkpoint_to_eval,
+    'evaluation_timestamp': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+    'per_city_test_aurocs': per_city_test_aurocs_json,
+    'per_city_length_test': str(all_city_length),
+    'average_test_auroc': f"{average_test_auroc_overview:.4f}" if isinstance(average_test_auroc_overview, float) else average_test_auroc_overview,
+}
+
+dicts_list = [hparams, extracted_metrics_dict, per_city_eval_data]
+
+overview_csv_filepath = os.path.join(f'{paths.models}/logs', "experiment_overview.csv")
+update_experiment_overview_csv(overview_csv_filepath, dicts_list)
+
+if 'empty_cache' in globals() and callable(globals()['empty_cache']): empty_cache(device)
+
+# %%
