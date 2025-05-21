@@ -75,7 +75,7 @@ if args.eval_cities is None:
     args.eval_cities = args.cities # Default to the training cities
 
 # Define your label_map (this is the one you want as default)
-default_label_map = {0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))}
+default_label_map = {0:0, 1:0, 2:0, 3:1, 255:torch.tensor(float('nan'))}
 args.label_map = default_label_map # Now args.label_map exists
 
 BACKBONE_PATH = f'{paths.models}/{args.backbone_model}'
