@@ -214,7 +214,7 @@ class SiameseModule(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.model           = model
-        self.downscale       = downscale # 1=8m, 2=16m, 7=56m, 14=112m
+        self.downscale       = downscale
         self.model_name      = model_name
         self.contrast_loss   = contrastive_loss
         self.sigmoid_loss    = torchvision.ops.sigmoid_focal_loss
@@ -245,8 +245,7 @@ class SiameseModule(pl.LightningModule):
         self.count_parameters()
 
     def forward(self, X:torch.Tensor) -> torch.Tensor:
-        Y = self.model(X)
-        return Y
+        return self.model(X)
     
     def training_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
         X, Y  = batch
@@ -255,7 +254,7 @@ class SiameseModule(pl.LightningModule):
         if self.downscale > 1:
             Y    = F.max_pool2d(torch.nan_to_num(Y, nan=0.0), kernel_size=self.downscale, stride=self.downscale)
             mask = F.max_pool2d(mask.int(), kernel_size=self.downscale, stride=self.downscale)
-            mask = mask.bool() & ~Y.bool()
+            mask = mask.bool() & ~Y.bool() # Compute loss on tiles with y=1 OR y=0 & y!=NaN
             D    = F.avg_pool2d(D,  kernel_size=self.downscale, stride=self.downscale)
             Yh   = F.avg_pool2d(Yh, kernel_size=self.downscale, stride=self.downscale)
         loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask], reduction='mean')
