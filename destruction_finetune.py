@@ -26,6 +26,7 @@ from torchmetrics import classification
 
 # Utilities
 device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
+
 params = argparse.Namespace(
     cities=['aleppo'],
     batch_size=32,
@@ -149,8 +150,8 @@ def unprocess_image(image:torch.Tensor, processor) -> torch.Tensor:
 train_datafiles = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_train_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_train_balanced.zarr') for city in params.cities]))
 val_datafiles   = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_val_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_val_balanced.zarr')   for city in params.cities]))
 test_datafiles  = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_test_balanced.zarr',  labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_test_balanced.zarr')  for city in params.cities]))
-processor = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
-formatter = Formatter(processor=processor, label_map=params.label_map, image_size=processor.size['height'])
+processor   = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
+formatter   = Formatter(processor=processor, label_map=params.label_map, image_size=processor.size['height'])
 data_module = ZarrDataModule(train_datafiles=train_datafiles, val_datafiles=val_datafiles, test_datafiles=test_datafiles, formatter=formatter, batch_size=params.batch_size, shuffle=True)
 del train_datafiles, val_datafiles, test_datafiles
 
@@ -340,14 +341,13 @@ model_module = SiameseModule(
 
 #%% TRAINS MODEL
 
-# Initialises logger
+# Initialises logger and callbacks
 logger = loggers.CSVLogger(
     save_dir=f'{paths.models}/logs', 
     name=model_module.model_name, 
     version=0
 )
 
-# Initialises callbacks
 model_checkpoint = callbacks.ModelCheckpoint(
     dirpath=paths.models,
     filename=f'{model_module.model_name}-{{epoch:02d}}-{{step:05d}}',
@@ -356,6 +356,7 @@ model_checkpoint = callbacks.ModelCheckpoint(
     save_top_k=1,
     save_last=True
 )
+
 early_stopping = callbacks.EarlyStopping(
     monitor='val_loss',
     mode='min',
@@ -373,6 +374,8 @@ trainer = pl.Trainer(
 trainer.fit(
     model=model_module,
     datamodule=data_module)
+
+empty_cache(device=device)
 
 # Fine-tunes full model
 model_module.unfreeze_encoder()
@@ -392,7 +395,8 @@ trainer.fit(
     ckpt_path=model_checkpoint.last_model_path if model_checkpoint.last_model_path else None,
 )
 
+empty_cache(device=device)
+
 # Saves model
 trainer.save_checkpoint(f'{paths.models}/{model_module.model_name}.ckpt')
-empty_cache(device=device)
 #%%
