@@ -124,26 +124,29 @@ def center_window(source:str, size:dict) -> windows.Window:
     )
     return window
 
-def tiled_profile(source:str, tile_size:int) -> dict:
-    raster  = rasterio.open(source)
-    profile = raster.profile
-    assert profile['width']  % tile_size == 0, 'Invalid dimensions'
-    assert profile['height'] % tile_size == 0, 'Invalid dimensions'
-    affine  = profile['transform']
-    affine  = rasterio.Affine(affine[0] * tile_size, affine[1], affine[2], affine[3], affine[4] * tile_size, affine[5])
-    profile.update(width=profile['width'] // tile_size, height=profile['height'] // tile_size, count=tile_size, transform=affine)
-    return profile
+def tiled_profile(source:str, tile_size:int=224, crop_size:int=224, return_window:bool=False) -> dict:
+    with rasterio.open(source) as raster:
+        profile = raster.profile.copy()
+        width   = profile['width']  - (profile['width']  % crop_size)
+        height  = profile['height'] - (profile['height'] % crop_size)
+        window  = rasterio.windows.Window(0, 0, width, height)
+        transform = raster.window_transform(window)
+        transform = rasterio.Affine(transform.a * tile_size, transform.b, transform.c, transform.d, transform.e * tile_size, transform.f)
+        profile.update(width=width // tile_size, height=height // tile_size, transform=transform)
+        if return_window:
+            return profile, window
+        else:
+            return profile
 
 #%% ARRAY UTILITIES
 
-def image_to_tiles(image:torch.Tensor, tile_size:int, stride:int=None) -> torch.Tensor:
+def image_to_tiles(image:torch.Tensor, tile_size:int, stride:int=None):
     '''Converts an image tensor to a tensor of tiles'''
-    depth, height, width = image.size()
-    if stride is None: 
+    if stride is None:
         stride = tile_size
-    pad_h, pad_w = [math.ceil((dim - tile_size) / stride) * stride + tile_size - dim for dim in (height, width)]
-    image = nn.functional.pad(image, (0, pad_w, 0, pad_h), mode='constant', value=255)
+    depth, height, width = image.size()
     tiles = image.unfold(1, tile_size, stride).unfold(2, tile_size, stride)
+    ntiles_h, ntiles_w = tiles.size(1), tiles.size(2)
     tiles = tiles.moveaxis(0, 2).contiguous()
     tiles = tiles.view(-1, depth, tile_size, tile_size)
     return tiles

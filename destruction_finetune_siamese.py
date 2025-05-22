@@ -28,34 +28,45 @@ from torchmetrics import classification
 device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
 params = argparse.Namespace(
     cities=['aleppo'],
-    batch_size=64,
+    batch_size=32,
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))})
 
 #%% INITIALISES DATA MODULE
 
 class ZarrDataset(utils.data.Dataset):
 
-    def __init__(self, images_zarr:str, labels_zarr:str):
+    def __init__(self, images_zarr:str, labels_zarr:str) -> None:
         self.images = zarr.open(images_zarr, mode='r')
         self.labels = zarr.open(labels_zarr, mode='r')
-        self.length = len(self.images)
-        self.processor = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
     
-    def __len__(self):
-        return self.length
+    def __len__(self) -> int:
+        return len(self.images)
     
-    def __getitem__(self, idx):
-        X = self.images[idx]
-        X = torch.stack([self.processor(x, return_tensors='pt')['pixel_values'] for x in X])
-        Y = torch.from_numpy(self.labels[idx])
-        return X, Y
+    def __getitem__(self, idx:int) -> tuple:
+        x = torch.from_numpy(self.images[idx])
+        y = torch.from_numpy(self.labels[idx])
+        return x, y
+
+class Formatter:
+    
+    def __init__(self, processor, label_map:dict) -> None:
+        self.processor = processor
+        self.label_map = label_map
+
+    def __call__(self, x:torch.Tensor, y:torch.Tensor):
+        x = x.view(-1, 3, 224, 224)
+        x = self.processor(x, return_tensors='pt')['pixel_values']
+        x = x.view(-1, 2, 3, 224, 224)
+        for k, v in self.label_map.items():
+            y = torch.where(y == k, v, y)
+        return x, y
 
 class ZarrDataLoader:
 
-    def __init__(self, datafiles:list, datasets:list, label_map:dict, batch_size:int, shuffle:bool=True):
+    def __init__(self, datafiles:list, datasets:list, formatter, batch_size:int, shuffle:bool=True):
         self.datafiles    = datafiles
         self.datasets     = datasets
-        self.label_map    = label_map
+        self.formatter    = formatter
         self.batch_size   = batch_size
         self.shuffle      = shuffle
         self.batch_index  = 0
@@ -92,24 +103,23 @@ class ZarrDataLoader:
             start = indices[self.batch_index]
             end   = indices[self.batch_index + 1]
             if start != end: # Skips empty batches
-                X_ds, Y_ds = dataset[start:end]
-                X.append(X_ds), 
-                Y.append(Y_ds)
+                x, y = dataset[start:end]
+                X.append(x), 
+                Y.append(y)
         X, Y = torch.cat(X, dim=0), torch.cat(Y, dim=0)
-        # Remaps labels
-        for key, value in self.label_map.items():
-            Y = torch.where(Y == key, value, Y)
+        X, Y = self.formatter(X, Y)
         # Updates batch index
         self.batch_index += 1
         return X, Y
 
 class ZarrDataModule(pl.LightningDataModule):
     
-    def __init__(self, train_datafiles:list, valid_datafiles:list, test_datafiles:list, batch_size:int, label_map:dict, shuffle:bool=True) -> None:
+    def __init__(self, train_datafiles:list, valid_datafiles:list, test_datafiles:list, formatter, batch_size:int, shuffle:bool=True) -> None:
         super().__init__()
         self.train_datafiles = train_datafiles
         self.valid_datafiles = valid_datafiles
         self.test_datafiles = test_datafiles
+        self.formatter = formatter
         self.batch_size = batch_size
         self.label_map = label_map
         self.shuffle = shuffle
@@ -120,19 +130,21 @@ class ZarrDataModule(pl.LightningDataModule):
         self.test_datasets  = [ZarrDataset(**self.test_datafiles[city])  for city in params.cities]
 
     def train_dataloader(self):
-        return ZarrDataLoader(datafiles=self.train_datafiles, datasets=self.train_datasets, label_map=self.label_map, batch_size=self.batch_size, shuffle=self.shuffle)
+        return ZarrDataLoader(datafiles=self.train_datafiles, datasets=self.train_datasets, formatter=self.formatter, batch_size=self.batch_size, shuffle=self.shuffle)
 
     def val_dataloader(self):
-        return ZarrDataLoader(datafiles=self.valid_datafiles, datasets=self.valid_datasets, label_map=self.label_map, batch_size=self.batch_size, shuffle=self.shuffle)
+        return ZarrDataLoader(datafiles=self.valid_datafiles, datasets=self.valid_datasets, formatter=self.formatter, batch_size=self.batch_size, shuffle=self.shuffle)
 
     def test_dataloader(self):
-        return ZarrDataLoader(datafiles=self.test_datafiles, datasets=self.test_datasets,   label_map=self.label_map, batch_size=self.batch_size, shuffle=self.shuffle)
+        return ZarrDataLoader(datafiles=self.test_datafiles, datasets=self.test_datasets, formatter=self.formatter, batch_size=self.batch_size, shuffle=self.shuffle)
 
 # Initialises datasets
 train_datafiles = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_train_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_train_balanced.zarr') for city in params.cities]))
 valid_datafiles = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_valid_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_valid_balanced.zarr') for city in params.cities]))
 test_datafiles  = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_test_balanced.zarr',  labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_test_balanced.zarr')  for city in params.cities]))
-data_module = ZarrDataModule(train_datafiles=train_datafiles, valid_datafiles=valid_datafiles, test_datafiles=test_datafiles, batch_size=params.batch_size, label_map=params.label_map, shuffle=True)
+processor = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
+formatter = Formatter(processor=processor, label_map=params.label_map)
+data_module = ZarrDataModule(train_datafiles=train_datafiles, valid_datafiles=valid_datafiles, test_datafiles=test_datafiles, formatter=formatter, batch_size=params.batch_size, shuffle=True)
 del train_datafiles, valid_datafiles, test_datafiles
 
 ''' Check data module
