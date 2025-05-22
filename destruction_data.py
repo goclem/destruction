@@ -21,8 +21,8 @@ from destruction_utilities import *
 # Parameters
 params = argparse.Namespace(
     city='aleppo',
-    input_size=224,
-    label_size=16, 
+    image_size=224,
+    patch_size=16, 
     sample_sizes={'train':0.50, 'val':0.25, 'test':0.25},
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))},
     sequence_ratio=1,
@@ -34,7 +34,7 @@ params = argparse.Namespace(
 
 # Computes analysis zone
 profile    = search_data(pattern=pattern(city=params.city, type='image'))[0]
-profile    = tiled_profile(source=profile, tile_size=params.input_size, crop_size=params.input_size)
+profile    = tiled_profile(source=profile, tile_size=params.image_size, crop_size=params.image_size)
 settlement = search_data(pattern=f'{params.city}_settlement.*gpkg$')[0]
 settlement = rasterise(source=settlement, profile=profile, update=dict(dtype='uint8')).astype(bool)
 noanalysis = search_data(pattern=f'{params.city}_noanalysis.*gpkg$')[0]
@@ -80,7 +80,7 @@ for i in random.choice(np.arange(damage.shape[0]), 1):
 # Writes damage labels
 damage  = gpd.GeoDataFrame(data=filling[dates].astype(int), geometry=geoms)
 profile = search_data(pattern=pattern(city=params.city, type='image'))[0]
-profile = tiled_profile(source=profile, tile_size=params.label_size, crop_size=params.input_size)
+profile = tiled_profile(source=profile, tile_size=params.patch_size, crop_size=params.image_size)
 
 print('Writing damage labels')
 for date in dates:
@@ -101,7 +101,7 @@ images  = search_data(pattern(city=params.city, type='image'))
 labels  = search_data(pattern(city=params.city, type='label'))
 samples = search_data(f'{params.city}_samples.tif$')
 samples = load_sequences(samples, tile_size=1).squeeze()
-_, window = tiled_profile(source=images[0], tile_size=params.label_size, crop_size=params.input_size, return_window=True)
+_, window = tiled_profile(source=images[0], tile_size=params.patch_size, crop_size=params.image_size, return_window=True)
 
 # Writes zarr arrays
 print('Creating the sequences datasets')
@@ -110,10 +110,10 @@ for t, (image, label) in enumerate(zip(images, labels)):
     # Loads images and labels
     src_images = read_raster(image, dtype='uint8', window=window)
     src_images = torch.tensor(src_images).permute(2, 0, 1)
-    src_images = image_to_tiles(image=src_images, tile_size=params.input_size).numpy()
+    src_images = image_to_tiles(image=src_images, tile_size=params.image_size).numpy()
     src_labels = read_raster(label, dtype='uint8', window=window)
     src_labels = torch.tensor(src_labels).permute(2, 0, 1)
-    src_labels = image_to_tiles(image=src_labels, tile_size=params.input_size//params.label_size).numpy()
+    src_labels = image_to_tiles(image=src_labels, tile_size=params.image_size//params.patch_size).numpy()
     # Writes data for each sample
     for sample, value in dict(train=1, val=2, test=3).items():
         dst_images = f'{paths.data}/{params.city}/zarr/images_sequence_{sample}.zarr'

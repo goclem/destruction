@@ -49,17 +49,19 @@ class ZarrDataset(utils.data.Dataset):
 
 class Formatter:
     
-    def __init__(self, processor, label_map:dict) -> None:
-        self.processor = processor
-        self.label_map = label_map
+    def __init__(self, processor, label_map:dict, image_size:int=224) -> None:
+        self.processor  = processor
+        self.label_map  = label_map
+        self.image_size = image_size
 
-    def __call__(self, x:torch.Tensor, y:torch.Tensor):
-        x = x.view(-1, 3, 224, 224)
-        x = self.processor(x, return_tensors='pt')['pixel_values']
-        x = x.view(-1, 2, 3, 224, 224)
+    def __call__(self, X:torch.Tensor, Y:torch.Tensor):
+        X = X.view(-1, 3, self.image_size, self.image_size)
+        X = self.processor(X, return_tensors='pt')['pixel_values']
+        X = X.view(-1, 2, 3, self.image_size, self.image_size)
         for k, v in self.label_map.items():
-            y = torch.where(y == k, v, y)
-        return x, y
+            Y = Y.squeeze(1) # Removes channel dimension
+            Y = torch.where(Y == k, v, Y)
+        return X, Y
 
 class ZarrDataLoader:
 
@@ -108,71 +110,83 @@ class ZarrDataLoader:
                 Y.append(y)
         X, Y = torch.cat(X, dim=0), torch.cat(Y, dim=0)
         X, Y = self.formatter(X, Y)
-        # Updates batch index
-        self.batch_index += 1
+        self.batch_index += 1 # Updates batch index
         return X, Y
 
 class ZarrDataModule(pl.LightningDataModule):
     
-    def __init__(self, train_datafiles:list, valid_datafiles:list, test_datafiles:list, formatter, batch_size:int, shuffle:bool=True) -> None:
+    def __init__(self, train_datafiles:list, val_datafiles:list, test_datafiles:list, formatter, batch_size:int, shuffle:bool=True) -> None:
         super().__init__()
         self.train_datafiles = train_datafiles
-        self.valid_datafiles = valid_datafiles
+        self.val_datafiles = val_datafiles
         self.test_datafiles = test_datafiles
         self.formatter = formatter
         self.batch_size = batch_size
-        self.label_map = label_map
         self.shuffle = shuffle
 
     def setup(self, stage:str=None):
         self.train_datasets = [ZarrDataset(**self.train_datafiles[city]) for city in params.cities]
-        self.valid_datasets = [ZarrDataset(**self.valid_datafiles[city]) for city in params.cities]
+        self.val_datasets   = [ZarrDataset(**self.val_datafiles[city]) for city in params.cities]
         self.test_datasets  = [ZarrDataset(**self.test_datafiles[city])  for city in params.cities]
 
     def train_dataloader(self):
         return ZarrDataLoader(datafiles=self.train_datafiles, datasets=self.train_datasets, formatter=self.formatter, batch_size=self.batch_size, shuffle=self.shuffle)
 
     def val_dataloader(self):
-        return ZarrDataLoader(datafiles=self.valid_datafiles, datasets=self.valid_datasets, formatter=self.formatter, batch_size=self.batch_size, shuffle=self.shuffle)
+        return ZarrDataLoader(datafiles=self.val_datafiles, datasets=self.val_datasets, formatter=self.formatter, batch_size=self.batch_size, shuffle=self.shuffle)
 
     def test_dataloader(self):
         return ZarrDataLoader(datafiles=self.test_datafiles, datasets=self.test_datasets, formatter=self.formatter, batch_size=self.batch_size, shuffle=self.shuffle)
 
+def unprocess_image(image:torch.Tensor, processor) -> torch.Tensor:
+    means = torch.tensor(processor.image_mean).view(3, 1, 1)
+    stds  = torch.tensor(processor.image_std).view(3, 1, 1)
+    image = image * stds + means
+    image = (image * 255.0).clamp(0, 255).to(torch.uint8)
+    return image
+
 # Initialises datasets
 train_datafiles = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_train_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_train_balanced.zarr') for city in params.cities]))
-valid_datafiles = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_valid_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_valid_balanced.zarr') for city in params.cities]))
+val_datafiles   = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_val_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_val_balanced.zarr')   for city in params.cities]))
 test_datafiles  = dict(zip(params.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_test_balanced.zarr',  labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_test_balanced.zarr')  for city in params.cities]))
 processor = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
-formatter = Formatter(processor=processor, label_map=params.label_map)
-data_module = ZarrDataModule(train_datafiles=train_datafiles, valid_datafiles=valid_datafiles, test_datafiles=test_datafiles, formatter=formatter, batch_size=params.batch_size, shuffle=True)
-del train_datafiles, valid_datafiles, test_datafiles
+formatter = Formatter(processor=processor, label_map=params.label_map, image_size=processor.size['height'])
+data_module = ZarrDataModule(train_datafiles=train_datafiles, val_datafiles=val_datafiles, test_datafiles=test_datafiles, formatter=formatter, batch_size=params.batch_size, shuffle=True)
+del train_datafiles, val_datafiles, test_datafiles
 
 ''' Check data module
 data_module.setup()
-X, Y = next(data_module.train_dataloader())
-for idx in np.random.choice(range(len(X)), size=5, replace=False):
-    display_sequence(X[idx], [0] + [int(Y[idx])])
-del X, Y, idx
+loader = iter(data_module.train_dataloader())
+X, Y   = next(loader)
+for i in np.random.choice(len(X), size=5, replace=False):
+    x    = torch.stack([unprocess_image(x, processor) for x in X[i]])
+    y    = F.interpolate(Y[i].view(1, 1, 14, 14), size=(224, 224), mode='nearest').squeeze(0).bool()
+    x[1] = torchvision.utils.draw_segmentation_masks(x[1], y, alpha=0.25, colors=['red'])
+    display_sequence(x, titles=['x0', 'x1'])
+del loader, X, Y, x, y, i
 '''
 
 #%% INITIALISES MODEL MODULE
 
-def contrastive_loss(distance:torch.Tensor, label:torch.Tensor, margin:float) -> torch.Tensor:
+def contrastive_loss(distance:torch.Tensor, label:torch.Tensor, margin:float, reduction:str=None) -> torch.Tensor:
     loss = (1 - label) * torch.pow(distance, 2) + label * torch.pow(torch.clamp(margin - distance, min=0.0), 2)
-    return loss.mean()
+    if reduction == 'mean':
+        loss = loss.mean()
+    return loss
 
 class SiameseModel(nn.Module):
     
-    def __init__(self, backbone:str):
+    def __init__(self, backbone:str='facebook/vit-mae-base') -> None:
         super().__init__()
-        self.encoder   = transformers.ViTMAEModel.from_pretrained(backbone)
+        self.encoder   = transformers.ViTModel.from_pretrained(backbone) # If using VitMAE loader, provide bool_masked_pos
         self.model_dim = self.encoder.config.hidden_size
+        self.patch_dim = self.encoder.config.image_size // self.encoder.config.patch_size
         self.project0  = nn.Sequential(
             nn.Linear(self.model_dim, self.model_dim//2),
             nn.GELU(),
             nn.Linear(self.model_dim//2, self.model_dim//2)
         )
-        self.project1  = nn.Sequential(
+        self.project1 = nn.Sequential(
             nn.Linear(self.model_dim, self.model_dim//2),
             nn.GELU(),
             nn.Linear(self.model_dim//2, self.model_dim//2)
@@ -180,97 +194,125 @@ class SiameseModel(nn.Module):
         self.output = nn.Linear(1, 1)
 
     def forward_branch(self, Xt:torch.Tensor) -> torch.Tensor:
-        Ht = self.encoder(Xt)
-        Ht = Ht.last_hidden_state[:, 0, ...]
-        return Ht
+        return self.encoder(Xt).last_hidden_state[:, 1:, :]
 
     def forward(self, X:torch.Tensor, Y:torch.Tensor=None) -> torch.Tensor:
         H0 = self.forward_branch(X[:,0])
-        H0 = self.project0(H0)
         H1 = self.forward_branch(X[:,1])
+        H0 = self.project0(H0)
         H1 = self.project1(H1)
-        D  = F.cosine_similarity(H0, H1, dim=1, eps=1e-8).unsqueeze(1)
-        Yh = self.output(D)
+        D  = (H0 - H1).norm(dim=-1) # L2 distance
+        Yh = self.output(D.unsqueeze(-1)).squeeze(-1)
+        D  = D.reshape(-1,  self.patch_dim, self.patch_dim)
+        Yh = Yh.reshape(-1, self.patch_dim, self.patch_dim)
         return D, Yh
 
 class SiameseModule(pl.LightningModule):
     
-    def __init__(self, model:str, model_name:str, learning_rate:float=1e-4, weight_decay:float=0.05, weigh_contrast:float=0.0, margin_contrast=1.0):
+    def __init__(self, model:str, downscale:int, model_name:str, learning_rate:float=1e-4, weight_decay:float=0.05, weight_contrast:float=0.0, margin_contrast=1.0):
         
         super().__init__()
         self.save_hyperparameters()
-        self.model = model
+        self.model           = model
+        self.downscale       = downscale # 1=8m, 2=16m, 7=56m, 14=112m
         self.model_name      = model_name
         self.contrast_loss   = contrastive_loss
         self.sigmoid_loss    = torchvision.ops.sigmoid_focal_loss
         self.learning_rate   = learning_rate
         self.weight_decay    = weight_decay
-        self.weigh_contrast  = weigh_contrast
-        self.margin_contrast = 1.0
+        self.weight_contrast = weight_contrast
+        self.margin_contrast = margin_contrast
         self.trainable       = None
         self.accuracy_metric = classification.BinaryAccuracy()
         self.auroc_metric    = classification.BinaryAUROC()
+
+    def count_parameters(self):
+        '''Counts the number of parameters in a model'''
+        trainable = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        nontrain  = sum(p.numel() for p in self.model.parameters() if not p.requires_grad)
+        print(f'Trainable parameters: {trainable:,} | Non-trainable parameters: {nontrain:,}')
 
     def freeze_encoder(self):
         self.trainable = [param.requires_grad for param in self.model.encoder.parameters()]
         for param in self.model.encoder.parameters():
             param.requires_grad = False
-        print('Encoder frozen')
+        self.count_parameters()
 
     def unfreeze_encoder(self):
         for param, status in zip(self.model.encoder.parameters(), self.trainable):
             param.requires_grad = status
         self.trainer.strategy.setup_optimizers(self.trainer)
-        print('Encoder unfrozen, optimisers reset')
+        self.count_parameters()
 
     def forward(self, X:torch.Tensor) -> torch.Tensor:
         Y = self.model(X)
         return Y
     
     def training_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
-        X, Y   = batch
-        D, Yh  = self.model(X)
-        loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
-        loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
-        train_loss = loss_S + self.weigh_contrast * loss_C
-        self.log('train_loss', train_loss, prog_bar=True)
+        X, Y  = batch
+        D, Yh = self.model(X)
+        mask  = torch.isnan(Y)
+        if self.downscale > 1:
+            Y    = F.max_pool2d(torch.nan_to_num(Y, nan=0.0), kernel_size=self.downscale, stride=self.downscale)
+            mask = F.max_pool2d(mask.int(), kernel_size=self.downscale, stride=self.downscale)
+            mask = mask.bool() & ~Y.bool()
+            D    = F.avg_pool2d(D,  kernel_size=self.downscale, stride=self.downscale)
+            Yh   = F.avg_pool2d(Yh, kernel_size=self.downscale, stride=self.downscale)
+        loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask], reduction='mean')
+        loss_C = self.contrast_loss(D[~mask], Y[~mask], margin=self.margin_contrast, reduction='mean')
+        loss   = loss_S + self.weight_contrast * loss_C
+        self.log('train_loss', loss, prog_bar=True)
         # Metrics
         probs = torch.sigmoid(Yh)
-        self.accuracy_metric.update(probs, Y)
-        self.auroc_metric.update(probs, Y)
-        self.log('train_acc', self.accuracy_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
-        self.log('train_auroc', self.auroc_metric.compute(),  on_step=True, on_epoch=True, prog_bar=True)
-        return train_loss
+        self.accuracy_metric.update(probs[~mask], Y[~mask])
+        self.auroc_metric.update(probs[~mask], Y[~mask])
+        self.log('train_acc',   self.accuracy_metric.compute(), on_step=True,  on_epoch=True, prog_bar=True)
+        self.log('train_auroc', self.auroc_metric.compute(),    on_step=False, on_epoch=True, prog_bar=True)
+        return loss
 
     def validation_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
-        X, Y   = batch
-        D, Yh  = self.model(X)
-        loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
-        loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
-        val_loss = loss_S + self.weigh_contrast * loss_C
-        self.log('val_loss', val_loss, prog_bar=True)
+        X, Y  = batch
+        D, Yh = self.model(X)
+        mask  = torch.isnan(Y)
+        if self.downscale > 1:
+            Y    = F.max_pool2d(torch.nan_to_num(Y, nan=0.0), kernel_size=self.downscale, stride=self.downscale)
+            mask = F.max_pool2d(mask.int(), kernel_size=self.downscale, stride=self.downscale)
+            mask = mask.bool() & ~Y.bool()
+            D    = F.avg_pool2d(D,  kernel_size=self.downscale, stride=self.downscale)
+            Yh   = F.avg_pool2d(Yh, kernel_size=self.downscale, stride=self.downscale)
+        loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask], reduction='mean')
+        loss_C = self.contrast_loss(D[~mask], Y[~mask], margin=self.margin_contrast, reduction='mean')
+        loss   = loss_S + self.weight_contrast * loss_C
+        self.log('val_loss', loss, prog_bar=True)
         # Metrics
         probs = torch.sigmoid(Yh)
-        self.accuracy_metric.update(probs, Y)
-        self.auroc_metric.update(probs, Y)
-        self.log('val_acc', self.accuracy_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
-        self.log('val_auroc', self.auroc_metric.compute(),  on_step=True, on_epoch=True, prog_bar=True)
-        return val_loss
+        self.accuracy_metric.update(probs[~mask], Y[~mask])
+        self.auroc_metric.update(probs[~mask], Y[~mask])
+        self.log('val_acc',   self.accuracy_metric.compute(), on_step=False, on_epoch=True, prog_bar=True)
+        self.log('val_auroc', self.auroc_metric.compute(),    on_step=False, on_epoch=True, prog_bar=True)
+        return loss
     
     def test_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
-        X, Y   = batch
-        D, Yh  = self.model(X)
-        loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
-        loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
-        test_loss = loss_S + self.weigh_contrast * loss_C
-        self.log('test_loss', test_loss, prog_bar=True)
+        X, Y  = batch
+        D, Yh = self.model(X)
+        mask  = torch.isnan(Y)
+        if self.downscale > 1:
+            Y    = F.max_pool2d(torch.nan_to_num(Y, nan=0.0), kernel_size=self.downscale, stride=self.downscale)
+            mask = F.max_pool2d(mask.int(), kernel_size=self.downscale, stride=self.downscale)
+            mask = mask.bool() & ~Y.bool()
+            D    = F.avg_pool2d(D,  kernel_size=self.downscale, stride=self.downscale)
+            Yh   = F.avg_pool2d(Yh, kernel_size=self.downscale, stride=self.downscale)
+        loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask], reduction='mean')
+        loss_C = self.contrast_loss(D[~mask], Y[~mask], margin=self.margin_contrast, reduction='mean')
+        loss   = loss_S + self.weight_contrast * loss_C
+        self.log('test_loss', loss, prog_bar=True)
         # Metrics
         probs = torch.sigmoid(Yh)
-        self.accuracy_metric.update(probs, Y)
-        self.auroc_metric.update(probs, Y)
-        self.log('test_acc', self.accuracy_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
-        self.log('test_auroc', self.auroc_metric.compute(),  on_step=True, on_epoch=True, prog_bar=True)
-        return test_loss
+        self.accuracy_metric.update(probs[~mask], Y[~mask])
+        self.auroc_metric.update(probs[~mask], Y[~mask])
+        self.log('test_acc',   self.accuracy_metric.compute(), on_step=False, on_epoch=True, prog_bar=True)
+        self.log('test_auroc', self.auroc_metric.compute(),    on_step=False, on_epoch=True, prog_bar=True)
+        return loss
 
     def configure_optimizers(self) -> dict:
         optimizer = optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
@@ -290,11 +332,12 @@ class SiameseModule(pl.LightningModule):
 
 # Initialises model module
 model_module = SiameseModule(
-    model=SiameseModel(backbone=f'{paths.models}/checkpoint-9920'), 
+    model=SiameseModel(backbone=f'{paths.models}/checkpoint-9920'),
+    downscale=7, # 1=8m, 2=16m, 7=56m, 14=112m  #! Should be set
     model_name='destruction_finetune_siamese', 
     learning_rate=1e-4,
     weight_decay=0.05,
-    weigh_contrast=0.1) #! Should be tuned
+    weight_contrast=0.1) #! Should be tuned
 
 #%% TRAINS MODEL
 
@@ -321,15 +364,19 @@ early_stopping = callbacks.EarlyStopping(
     verbose=True
 )
 
-# Aligns output layer (1 unit)
+# Aligns output layer
 model_module.freeze_encoder()
-count_parameters(model_module)
-trainer = pl.Trainer(max_epochs=1, accelerator=device)
-trainer.fit(model=model_module, datamodule=data_module)
+
+trainer = pl.Trainer(
+    max_epochs=1,
+    accelerator=device)
+
+trainer.fit(
+    model=model_module,
+    datamodule=data_module)
 
 # Fine-tunes full model
 model_module.unfreeze_encoder()
-count_parameters(model_module)
 
 trainer = pl.Trainer(
     max_epochs=100,

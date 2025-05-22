@@ -21,7 +21,7 @@ import time
 import torch
 import zarr
 
-from matplotlib import pyplot
+from matplotlib import pyplot as plt
 from rasterio import enums, features, windows
 from torch import nn, utils
 from torch.nn import functional as F
@@ -151,29 +151,6 @@ def image_to_tiles(image:torch.Tensor, tile_size:int, stride:int=None):
     tiles = tiles.view(-1, depth, tile_size, tile_size)
     return tiles
 
-def tiles_to_image(tiles:torch.Tensor, image_size:int, stride:int=None) -> torch.Tensor:
-    '''Converts a tensor of tiles to an image tensor'''
-    depth, height, width = image_size
-    tile_size = tiles.size(-1)
-    if stride is None: 
-        stride = tile_size
-    pad_h, pad_w  = [math.ceil((dim - tile_size) / stride) * stride + tile_size - dim for dim in (height, width)]
-    height, width = height + pad_h, width + pad_w
-    # Tiles to image
-    tiles = tiles.view(-1, depth * tile_size * tile_size)
-    tiles = tiles.t().unsqueeze(0)
-    image = F.fold(tiles, output_size=(height, width), kernel_size=tile_size, stride=stride)
-    # Normalisation
-    norm  = torch.ones_like(image)
-    norm  = norm.unfold(2, tile_size, stride).unfold(3, tile_size, stride)
-    norm  = norm.permute(0, 1, 4, 5, 2, 3).contiguous()
-    norm  = norm.view(1, depth * tile_size * tile_size, -1)
-    norm  = F.fold(norm, output_size=(height, width), kernel_size=tile_size, stride=stride)
-    image = (image / norm).squeeze(0)
-    # Removes padding
-    image = image[:, :-pad_h if pad_h > 0 else None, :-pad_w if pad_w > 0 else None]
-    return image
-
 def load_sequences(files:list, tile_size:int, window:int=None, stride:int=None) -> torch.Tensor:
     '''Loads a sequence of rasters as a tensor of tiles'''
     if window is not None:
@@ -186,36 +163,53 @@ def load_sequences(files:list, tile_size:int, window:int=None, stride:int=None) 
 
 #%% DISPLAY UTILITIES
     
-def display(image:torch.Tensor, title:str='', cmap:str='gray', channel_first:bool=True) -> None:
-    '''Displays an image'''
-    if isinstance(image, np.ndarray):
-        image = torch.from_numpy(image)
-    if channel_first:
-        image = image.permute(1, 2, 0)
-    fig, ax = pyplot.subplots(1, figsize=(10, 10))
-    ax.imshow(image, cmap=cmap)
-    ax.set_title(title, fontsize=20)
+def display_image(image:torch.Tensor, title:str='', figsize=(10, 10), fontsize=15, path:str=None, dpi:int=300) -> None:
+    image   = torch.einsum('chw -> hwc', image)
+    fig, ax = plt.subplots(1, figsize=figsize)
+    ax.imshow(image)
+    ax.set_title(title, fontsize=fontsize)
     ax.set_axis_off()
-    pyplot.tight_layout()
-    pyplot.show()
+    plt.tight_layout()
+    if path is not None:
+        plt.savefig(path, dpi=dpi)
+    else:
+        plt.show()
+    plt.close()
 
-def display_sequence(images:torch.Tensor, titles:list=None, grid_size:tuple=None, channel_first:bool=True) -> None:
-    '''Displays a grid of images'''
-    if isinstance(images, np.ndarray):
-        images = torch.from_numpy(images)
-    if channel_first:
-        images = images.permute(0, 2, 3, 1)
-    if grid_size is None: grid_size = (1, images.size(0))
-    if titles is None: titles = [None] * images.size(0)
-    if isinstance(titles, torch.Tensor): titles = titles.tolist()
-    fig, axs = pyplot.subplots(nrows=grid_size[0], ncols=grid_size[1], figsize=(3*grid_size[1], 3*grid_size[0]))
-    for ax, tile, title in zip(axs.ravel(), images, titles):
-        ax.imshow(tile)
-        ax.set_title(title)
-    for ax in axs.ravel():
+def display_sequence(images:torch.Tensor, titles:list=[''], figsize=(10, 10), fontsize=20, path:str=None, dpi:int=300) -> None:
+    images = torch.einsum('nchw -> nhwc', images)
+    nimage = len(images)
+    if len(titles) == 1:
+        titles = titles * nimage
+    fig, axs = plt.subplots(nrows=1, ncols=nimage, figsize=(figsize[1] * nimage, figsize[0]))
+    for ax, image, title in zip(axs.ravel(), images, titles):
+        ax.imshow(image)
+        ax.set_title(title, fontsize=fontsize)
         ax.set_axis_off()
-    pyplot.tight_layout()
-    pyplot.show()
+    plt.tight_layout(pad=2.0)
+    if path is not None:
+        plt.savefig(path, dpi=dpi)
+    else:
+        plt.show()
+    plt.close()
+
+def display_grid(images:torch.Tensor, titles:list=[''], gridsize:tuple=(3, 3), figsize:tuple=(15, 15), fontsize=15, suptitle:str=None, path:str=None, dpi:int=300) -> None:
+    images = torch.einsum('nchw -> nhwc', images)
+    if len(titles) == 1: 
+        titles = titles * np.prod(gridsize)
+    fig, axs = plt.subplots(nrows=gridsize[0], ncols=gridsize[1], figsize=figsize)
+    for ax, image, title in zip(axs.ravel(), images, titles):
+        ax.imshow(image)
+        ax.set_title(title, fontsize=fontsize)
+        ax.set_axis_off()
+        plt.tight_layout(pad=2)
+    if suptitle is not None:
+        fig.suptitle(suptitle, y=1.05, fontsize=fontsize*2)
+    if path is not None:
+        plt.savefig(path, dpi=dpi)
+    else:
+        plt.show()
+    plt.close()
 
 #%% DATASET UTILITIES
 
@@ -235,20 +229,7 @@ def shuffle_zarr(images_zarr:str, labels_zarr:str=None) -> None:
         dataset = zarr.open(labels_zarr, shape=labels.shape, dtype=labels.dtype, mode='w')
         dataset[:] = labels
 
-#%% MODEL TRAINING UTILITIES
-
-def count_parameters(model:nn.Module) -> None:
-    '''Counts the number of parameters in a model'''
-    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    nontrain  = sum(p.numel() for p in model.parameters() if not p.requires_grad)
-    print(f'Trainable parameters: {trainable:,} | Non-trainable parameters: {nontrain:,}')
-
-def set_trainable(module:nn.Module, trainable:bool|list[bool]) -> None:
-    '''Sets the trainable status of a model'''
-    if isinstance(trainable, bool):
-        trainable = [trainable] * len(list(module.parameters()))
-    for param, status in zip(module.parameters(), trainable):
-        param.requires_grad = status
+#%% MODEL UTILITIES
 
 def empty_cache(device:torch.device) -> None:
     '''Empties the cache of a device'''
@@ -256,72 +237,5 @@ def empty_cache(device:torch.device) -> None:
         torch.cuda.empty_cache()
     if device == 'mps':
         torch.mps.empty_cache()
-
-def optimise(model:nn.Module, train_loader, device:torch.device, criterion, optimiser, accumulate:int=1) -> torch.Tensor:
-    '''Optimises a model using a training sample for one epoch'''
-    model.train()
-    accuracy = metrics.BinaryAccuracy(device='cpu')
-    auroc    = metrics.BinaryAUROC(device='cpu')
-    run_loss, n_obs = 0.0, 0
-    for i, (X, Y) in enumerate(train_loader):
-        # Optimisation
-        optimiser.zero_grad()
-        X, Y = X.to(device), Y.to(device)
-        Yh   = model(X)
-        loss = criterion(Yh, Y)
-        loss.backward()
-        # Gradient accumulation
-        if ((i + 1) % accumulate == 0) or (i + 1 == len(train_loader)):
-            optimiser.step()
-        else:
-            for param in model.parameters():
-                if param.grad is not None:
-                    param.grad.data.add_(param.grad.data)
-        # Statistics
-        subset = ~torch.isnan(Y)
-        n_obs += subset.sum()
-        run_loss += (loss * subset.sum()).item()
-        accuracy.update(Y[subset], Yh[subset] > .5)
-        auroc.update(Y[subset], Yh[subset])
-        # Print statistics
-        print(f'{'Training': <10} | Batch {i+1:03d}/{len(train_loader):03d} | Loss {(run_loss / n_obs):.4f} | Accuracy {accuracy.compute().item():.4f} | Auroc {auroc.compute().item():.4f}', end='\r' if i+1 < len(train_loader) else '\n')
-    return run_loss / n_obs
-
-def validate(model:nn.Module, loader, device:torch.device, criterion, threshold:float=0.5) -> torch.Tensor:
-    '''Validates a model using a validation sample for one epoch'''
-    model.eval()
-    accuracy = metrics.BinaryAccuracy(device='cpu')
-    auroc    = metrics.BinaryAUROC(device='cpu')
-    run_loss, n_obs = 0.0, 0
-    with torch.no_grad():                       
-        for i, (X, Y) in enumerate(loader):
-            X, Y = X.to(device), Y.to(device)
-            Yh   = model(X)
-            loss = criterion(Yh, Y)
-            # Statistics
-            subset = ~torch.isnan(Y)
-            n_obs += subset.sum()
-            run_loss += (loss * subset.sum()).item()
-            accuracy.update(Y[subset], Yh[subset] > .5)
-            auroc.update(Y[subset], Yh[subset])
-            # Print statistics
-            print(f'{'Validation': <10} | Batch {i+1:03d}/{len(loader):03d} | Loss {(run_loss / n_obs):.4f} | Accuracy {accuracy.compute().item():.4f} | Auroc {auroc.compute().item():.4f}', end='\r' if i+1 < len(loader) else '\n')
-        return run_loss / n_obs
-
-def predict(model:nn.Module, loader, device:torch.device, n_batches:int=None) -> tuple:
-    '''Predicts the labels of a sample'''
-    model.eval()
-    if n_batches is None:
-        n_batches = len(loader)
-    Ys, Yhs = [None]*n_batches, [None]*n_batches
-    with torch.no_grad():
-        for i in range(n_batches):
-            X, Y   = next(iter(loader))
-            Ys[i]  = Y
-            Yhs[i] = model(X.to(device))
-            print(f'Batch {i+1:03d}/{n_batches:03d}', end='\r')
-    Ys  = torch.cat(Ys)
-    Yhs = torch.cat(Yhs)
-    return Ys, Yhs
 
 #%%
