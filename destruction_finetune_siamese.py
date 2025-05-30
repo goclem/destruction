@@ -58,7 +58,7 @@ parser.add_argument('--max_epochs_ft', type=int, default=100, help='Max epochs f
 parser.add_argument('--patience_ft', type=int, default=2, help='Early stopping patience for the fine-tuning stage.') # Increased default
 parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate for the optimizer.')
 parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training and evaluation.')
-parser.add_argument('--weight_contrast', type=float, default=0.1, help='Weight for the contrastive loss component.')
+parser.add_argument('--weight_contrast', type=float, default=0.25, help='Weight for the contrastive loss component.')
 parser.add_argument('--weight_decay', type=float, default=0.05, help='Penalizes large weights to prevent overfitting.')
 parser.add_argument('--margin_contrast', type=float, default=1, help='Value that explains how strict the contrastive loss is.')
 parser.add_argument('--backbone_model', type=str, default='checkpoint-9920', help='Name of the checkpoint of the pretrained encoder.')
@@ -75,7 +75,7 @@ if args.eval_cities is None:
     args.eval_cities = args.cities # Default to the training cities
 
 # Define your label_map (this is the one you want as default)
-default_label_map = {0:0, 1:0, 2:0, 3:1, 255:torch.tensor(float('nan'))}
+default_label_map = {0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))}
 args.label_map = default_label_map # Now args.label_map exists
 
 BACKBONE_PATH = f'{paths.models}/{args.backbone_model}'
@@ -367,7 +367,7 @@ class SiameseModel(nn.Module):
     
     def __init__(self, backbone:str):
         super().__init__()
-        self.encoder   = transformers.ViTMAEModel.from_pretrained(backbone)
+        self.encoder   = transformers.ViTModel.from_pretrained(backbone) #ViTMAEModel
         self.model_dim = self.encoder.config.hidden_size
         self.project0  = nn.Sequential(
             nn.Linear(self.model_dim, self.model_dim//2),
@@ -392,7 +392,7 @@ class SiameseModel(nn.Module):
         H1 = self.forward_branch(X[:,1])
         H1 = self.project1(H1)
         D  = F.cosine_similarity(H0, H1, dim=1, eps=1e-8).unsqueeze(1)
-        Yh = self.output(D)
+        Yh = self.output(-D)
         return D, Yh
 
 
