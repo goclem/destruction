@@ -30,7 +30,7 @@ params = argparse.Namespace(
     city=args.city, # aleppo
     image_size=224,
     patch_size=16, 
-    train_size=0.50, valid_size=0.25, test_size=0.25,
+    sample_sizes={'train':0.50, 'val':0.25, 'test':0.25},
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))},
     sequence_ratio=1,
     prepost_npre=1, #! Number of pre-images
@@ -119,7 +119,7 @@ for t, (image, label) in enumerate(zip(images, labels)):
     # Loads images and labels
     src_images = read_raster(image, dtype='uint8', window=window)
     src_images = torch.tensor(src_images).permute(2, 0, 1)
-    src_images = image_to_tiles(src_images, tile_size=params.tile_size).numpy()
+    src_images = image_to_tiles(src_images, tile_size=params.image_size).numpy()
     src_labels = read_raster(label, dtype='uint8', window=window)
     src_labels = torch.tensor(src_labels).permute(2, 0, 1)
     src_labels = image_to_tiles(src_labels, tile_size=params.image_size//params.patch_size).numpy()
