@@ -21,7 +21,7 @@ import time
 import torch
 import zarr
 
-from matplotlib import pyplot
+from matplotlib import pyplot as plt
 from rasterio import enums, features, windows
 from torch import nn, utils
 from torch.nn import functional as F
@@ -32,10 +32,10 @@ from torcheval import metrics
 
 home  = os.path.expanduser('~')
 paths = argparse.Namespace(
-    data='/lustre/ific.uv.es/ml/iae091/data',
-    models='/lustre/ific.uv.es/ml/iae091/models',
-    #data= "../data",
-    #models= "../models",
+    #data='/lustre/ific.uv.es/ml/iae091/data',
+    #models='/lustre/ific.uv.es/ml/iae091/models',
+    data= "../data",
+    models= "../models",
     figures='../figures',
     desktop=os.path.join(home, 'Desktop'),
     temporary=os.path.join(home, 'Desktop', 'temporary')
@@ -128,28 +128,33 @@ def center_window(source:str, size:dict) -> windows.Window:
     )
     return window
 
-def tiled_profile(source:str, tile_size:int) -> dict:
-    raster  = rasterio.open(source)
-    profile = raster.profile
-    assert profile['width']  % tile_size == 0, 'Invalid dimensions'
-    assert profile['height'] % tile_size == 0, 'Invalid dimensions'
-    affine  = profile['transform']
-    affine  = rasterio.Affine(affine[0] * tile_size, affine[1], affine[2], affine[3], affine[4] * tile_size, affine[5])
-    profile.update(width=profile['width'] // tile_size, height=profile['height'] // tile_size, count=tile_size, transform=affine)
-    return profile
+def tiled_profile(source:str, tile_size:int=224, crop_size:int=224, return_window:bool=False) -> dict:
+    with rasterio.open(source) as raster:
+        profile = raster.profile.copy()        
+        width   = profile['width']  - (profile['width']  % crop_size)
+        height  = profile['height'] - (profile['height'] % crop_size)
+        window  = rasterio.windows.Window(0, 0, width, height)
+        transform = raster.window_transform(window)
+        transform = rasterio.Affine(transform.a * tile_size, transform.b, transform.c, transform.d, transform.e * tile_size, transform.f)
+        profile.update(width=width // tile_size, height=height // tile_size, transform=transform)
+        if return_window:
+            return profile, window
+        else:
+            return profile
 
 #%% ARRAY UTILITIES
 
-def image_to_tiles(image:torch.Tensor, tile_size:int, stride:int=None) -> torch.Tensor:
+def image_to_tiles(image:torch.Tensor, tile_size:int, stride:int=None):
     '''Converts an image tensor to a tensor of tiles'''
-    depth, height, width = image.size()
     if stride is None: 
         stride = tile_size
-    pad_h, pad_w = [math.ceil((dim - tile_size) / stride) * stride + tile_size - dim for dim in (height, width)]
-    image = nn.functional.pad(image, (0, pad_w, 0, pad_h), mode='constant', value=255)
+    depth, height, width = image.size()
+    #pad_h, pad_w = [math.ceil((dim - tile_size) / stride) * stride + tile_size - dim for dim in (height, width)]
+    #image = nn.functional.pad(image, (0, pad_w, 0, pad_h), mode='constant', value=255)
     tiles = image.unfold(1, tile_size, stride).unfold(2, tile_size, stride)
+    ntiles_h, ntiles_w = tiles.size(1), tiles.size(2) # Why defining this?
     tiles = tiles.moveaxis(0, 2).contiguous()
-    tiles = tiles.view(-1, depth, tile_size, tile_size)
+    tiles = tiles.view(-1, depth, tile_size, tile_size) # maybe here ntiles_h, n_tiles_w
     return tiles
 
 def tiles_to_image(tiles:torch.Tensor, image_size:int, stride:int=None) -> torch.Tensor:
@@ -187,37 +192,54 @@ def load_sequences(files:list, tile_size:int, window:int=None, stride:int=None) 
 
 #%% DISPLAY UTILITIES
     
-def display(image:torch.Tensor, title:str='', cmap:str='gray', channel_first:bool=True) -> None:
-    '''Displays an image'''
-    if isinstance(image, np.ndarray):
-        image = torch.from_numpy(image)
-    if channel_first:
-        image = image.permute(1, 2, 0)
-    fig, ax = pyplot.subplots(1, figsize=(10, 10))
-    ax.imshow(image, cmap=cmap)
-    ax.set_title(title, fontsize=20)
+def display_image(image:torch.Tensor, title:str='', figsize=(10, 10), fontsize=15, path:str=None, dpi:int=300) -> None:
+    image   = torch.einsum('chw -> hwc', image)
+    fig, ax = plt.subplots(1, figsize=figsize)
+    ax.imshow(image)
+    ax.set_title(title, fontsize=fontsize)
     ax.set_axis_off()
-    pyplot.tight_layout()
-    pyplot.show()
+    plt.tight_layout()
+    if path is not None:
+        plt.savefig(path, dpi=dpi)
+    else:
+        plt.show()
+    plt.close()
 
-def display_sequence(images:torch.Tensor, titles:list=None, grid_size:tuple=None, channel_first:bool=True) -> None:
-    '''Displays a grid of images'''
-    if isinstance(images, np.ndarray):
-        images = torch.from_numpy(images)
-    if channel_first:
-        images = images.permute(0, 2, 3, 1)
-    if grid_size is None: grid_size = (1, images.size(0))
-    if titles is None: titles = [None] * images.size(0)
-    if isinstance(titles, torch.Tensor): titles = titles.tolist()
-    fig, axs = pyplot.subplots(nrows=grid_size[0], ncols=grid_size[1], figsize=(3*grid_size[1], 3*grid_size[0]))
-    for ax, tile, title in zip(axs.ravel(), images, titles):
-        ax.imshow(tile)
-        ax.set_title(title)
-    for ax in axs.ravel():
+def display_sequence(images:torch.Tensor, titles:list=[''], figsize=(10, 10), fontsize=20, path:str=None, dpi:int=300) -> None:
+    images = torch.einsum('nchw -> nhwc', images)
+    nimage = len(images)
+    if len(titles) == 1:
+        titles = titles * nimage
+    fig, axs = plt.subplots(nrows=1, ncols=nimage, figsize=(figsize[1] * nimage, figsize[0]))
+    for ax, image, title in zip(axs.ravel(), images, titles):
+        ax.imshow(image)
+        ax.set_title(title, fontsize=fontsize)
         ax.set_axis_off()
-    pyplot.tight_layout()
-    pyplot.show()
+    plt.tight_layout(pad=2.0)
+    if path is not None:
+        plt.savefig(path, dpi=dpi)
+    else:
+        plt.show()
+    plt.close()
 
+def display_grid(images:torch.Tensor, titles:list=[''], gridsize:tuple=(3, 3), figsize:tuple=(15, 15), fontsize=15, suptitle:str=None, path:str=None, dpi:int=300) -> None:
+    images = torch.einsum('nchw -> nhwc', images)
+    if len(titles) == 1: 
+        titles = titles * np.prod(gridsize)
+    fig, axs = plt.subplots(nrows=gridsize[0], ncols=gridsize[1], figsize=figsize)
+    for ax, image, title in zip(axs.ravel(), images, titles):
+        ax.imshow(image)
+        ax.set_title(title, fontsize=fontsize)
+        ax.set_axis_off()
+        plt.tight_layout(pad=2)
+    if suptitle is not None:
+        fig.suptitle(suptitle, y=1.05, fontsize=fontsize*2)
+    if path is not None:
+        plt.savefig(path, dpi=dpi)
+    else:
+        plt.show()
+    plt.close()
+    
 #%% DATASET UTILITIES
 
 def shuffle_zarr(images_zarr:str, labels_zarr:str=None) -> None:
@@ -237,7 +259,7 @@ def shuffle_zarr(images_zarr:str, labels_zarr:str=None) -> None:
         dataset[:] = labels
 
 #%% MODEL TRAINING UTILITIES
-
+"""
 def count_parameters(model:nn.Module) -> None:
     '''Counts the number of parameters in a model'''
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -324,5 +346,5 @@ def predict(model:nn.Module, loader, device:torch.device, n_batches:int=None) ->
     Ys  = torch.cat(Ys)
     Yhs = torch.cat(Yhs)
     return Ys, Yhs
-
+"""
 #%%
