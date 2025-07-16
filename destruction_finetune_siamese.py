@@ -17,6 +17,7 @@ import pytorch_lightning as pl
 import transformers
 import torch
 import torchvision
+
 import datetime
 import csv
 import json
@@ -236,7 +237,7 @@ def run_per_city_evaluation(
 
 
 #%% DEFINE DATA MODULE
-
+"""
 class ZarrDataset(utils.data.Dataset):
 
     def __init__(self, images_zarr:str, labels_zarr:str):
@@ -254,14 +255,44 @@ class ZarrDataset(utils.data.Dataset):
         X = torch.stack([self.processor(x, return_tensors='pt')['pixel_values'] for x in X])
         Y = torch.from_numpy(self.labels[idx])
         return X, Y
+"""
+ 
+class ZarrDataset(utils.data.Dataset):
+
+    def __init__(self, images_zarr:str, labels_zarr:str) -> None:
+        self.images = zarr.open(images_zarr, mode='r')
+        self.labels = zarr.open(labels_zarr, mode='r')
     
+    def __len__(self) -> int:
+        return len(self.images)
+    
+    def __getitem__(self, idx:int) -> tuple:
+        x = torch.from_numpy(self.images[idx])
+        y = torch.from_numpy(self.labels[idx])
+        return x, y
+
+class Formatter:
+    
+    def __init__(self, processor, label_map:dict, image_size:int=224) -> None:
+        self.processor  = processor
+        self.label_map  = label_map
+        self.image_size = image_size
+
+    def __call__(self, X:torch.Tensor, Y:torch.Tensor):
+        X = X.view(-1, 3, self.image_size, self.image_size)
+        X = self.processor(X, return_tensors='pt')['pixel_values']
+        X = X.view(-1, 2, 3, self.image_size, self.image_size)
+        for k, v in self.label_map.items():
+            Y = Y.squeeze(1) # Removes channel dimension
+            Y = torch.where(Y == k, v, Y)
+        return X, Y
 
 class ZarrDataLoader:
 
-    def __init__(self, datafiles:list, datasets:list, label_map:dict, batch_size:int, shuffle:bool=True):
+    def __init__(self, datafiles:list, datasets:list, formatter, batch_size:int, shuffle:bool=True):
         self.datafiles    = datafiles
         self.datasets     = datasets
-        self.label_map    = label_map
+        self.formatter    = formatter
         self.batch_size   = batch_size
         self.shuffle      = shuffle
         self.batch_index  = 0
@@ -305,8 +336,9 @@ class ZarrDataLoader:
                 Y.append(Y_ds)
         X, Y = torch.cat(X, dim=0), torch.cat(Y, dim=0)
         # Remaps labels
-        for key, value in self.label_map.items():
-            Y = torch.where(Y == key, value, Y)
+        #for key, value in self.label_map.items():
+        #    Y = torch.where(Y == key, value, Y)
+        X, Y = self.formatter(X, Y)
         # Updates batch index
         self.batch_index += 1
         return X, Y
@@ -314,13 +346,14 @@ class ZarrDataLoader:
 
 class ZarrDataModule(pl.LightningDataModule):
     
-    def __init__(self, train_datafiles:list, valid_datafiles:list, test_datafiles:list, batch_size:int, label_map:dict, shuffle:bool=True) -> None:
+    def __init__(self, train_datafiles:list, valid_datafiles:list, test_datafiles:list, formatter, batch_size:int, shuffle:bool=True) -> None:
         super().__init__()
         self.train_datafiles = train_datafiles
         self.valid_datafiles = valid_datafiles
         self.test_datafiles = test_datafiles
+        self.formatter = formatter
         self.batch_size = batch_size
-        self.label_map = label_map
+        #self.label_map = label_map
         self.shuffle = shuffle
 
     def setup(self, stage:str=None):
@@ -329,14 +362,21 @@ class ZarrDataModule(pl.LightningDataModule):
         self.test_datasets  = [ZarrDataset(**self.test_datafiles[city])  for city in args.cities]
 
     def train_dataloader(self):
-        return ZarrDataLoader(datafiles=self.train_datafiles, datasets=self.train_datasets, label_map=self.label_map, batch_size=self.batch_size, shuffle=self.shuffle)
+        return ZarrDataLoader(datafiles=self.train_datafiles, datasets=self.train_datasets, formatter=self.formatter, batch_size=self.batch_size, shuffle=self.shuffle)
 
     def val_dataloader(self):
-        return ZarrDataLoader(datafiles=self.valid_datafiles, datasets=self.valid_datasets, label_map=self.label_map, batch_size=self.batch_size, shuffle=self.shuffle)
+        return ZarrDataLoader(datafiles=self.valid_datafiles, datasets=self.valid_datasets, formatter=self.formatter, batch_size=self.batch_size, shuffle=self.shuffle)
 
     def test_dataloader(self):
-        return ZarrDataLoader(datafiles=self.test_datafiles, datasets=self.test_datasets,   label_map=self.label_map, batch_size=self.batch_size, shuffle=self.shuffle)
+        return ZarrDataLoader(datafiles=self.test_datafiles, datasets=self.test_datasets, formatter=self.formatter, batch_size=self.batch_size, shuffle=self.shuffle)
 
+
+def unprocess_image(image:torch.Tensor, processor) -> torch.Tensor:
+    means = torch.tensor(processor.image_mean).view(3, 1, 1)
+    stds  = torch.tensor(processor.image_std).view(3, 1, 1)
+    image = image * stds + means
+    image = (image * 255.0).clamp(0, 255).to(torch.uint8)
+    return image
 
 ''' Check data module
 data_module.setup()
@@ -350,7 +390,7 @@ del X, Y, idx
 
 
 # New contrastive loss for cosine similarity
-def contrastive_loss(similarity: torch.Tensor, label: torch.Tensor, margin: float = 1) -> torch.Tensor:
+def contrastive_loss_consine_sim(similarity: torch.Tensor, label: torch.Tensor, margin: float = 1) -> torch.Tensor:
     # For similar pairs (label=0), push similarity towards 1 (or margin_similar)
     # We want (margin_similar - similarity)^2 if similarity < margin_similar, else 0
     # Or simply (1-similarity)^2
@@ -361,6 +401,12 @@ def contrastive_loss(similarity: torch.Tensor, label: torch.Tensor, margin: floa
 
     return (loss_similar + loss_dissimilar).mean()
 
+def contrastive_loss(distance:torch.Tensor, label:torch.Tensor, margin:float, reduction:str=None) -> torch.Tensor:
+    loss = (1 - label) * torch.pow(distance, 2) + label * torch.pow(torch.clamp(margin - distance, min=0.0), 2)
+    if reduction == 'mean':
+        loss = loss.mean()
+    return loss
+
 
 ### New Model - Transformer based
 class SiameseModel(nn.Module):
@@ -369,6 +415,7 @@ class SiameseModel(nn.Module):
         super().__init__()
         self.encoder   = transformers.ViTModel.from_pretrained(backbone) #ViTMAEModel
         self.model_dim = self.encoder.config.hidden_size
+        self.patch_dim = self.encoder.config.image_size // self.encoder.config.patch_size
         self.project0  = nn.Sequential(
             nn.Linear(self.model_dim, self.model_dim//2),
             nn.GELU(),
@@ -383,7 +430,7 @@ class SiameseModel(nn.Module):
 
     def forward_branch(self, Xt:torch.Tensor) -> torch.Tensor:
         Ht = self.encoder(Xt)
-        Ht = Ht.last_hidden_state[:, 0, ...]
+        Ht = Ht.last_hidden_state[:, 1:, :]
         return Ht
 
     def forward(self, X:torch.Tensor, Y:torch.Tensor=None) -> torch.Tensor:
@@ -391,18 +438,23 @@ class SiameseModel(nn.Module):
         H0 = self.project0(H0)
         H1 = self.forward_branch(X[:,1])
         H1 = self.project1(H1)
-        D  = F.cosine_similarity(H0, H1, dim=1, eps=1e-8).unsqueeze(1)
-        Yh = self.output(-D)
+        #D  = F.cosine_similarity(H0, H1, dim=1, eps=1e-8).unsqueeze(1)
+        D  = (H0 - H1).norm(dim=-1) # L2 distance
+        Yh = self.output(D.unsqueeze(-1)).squeeze(-1)
+        D  = D.reshape(-1,  self.patch_dim, self.patch_dim)
+        Yh = Yh.reshape(-1, self.patch_dim, self.patch_dim)
+        #Yh = self.output(-D)
         return D, Yh
 
 
 class SiameseModule(pl.LightningModule):
     
-    def __init__(self, model:str, model_name:str, learning_rate:float=1e-4, weight_decay:float=0.05, weight_contrast:float=0.0, margin_contrast=1.0):
+    def __init__(self, model:str, downscale:int, model_name:str, learning_rate:float=1e-4, weight_decay:float=0.05, weight_contrast:float=0.0, margin_contrast=1.0):
         
         super().__init__()
         self.save_hyperparameters()
         self.model = model
+        self.downscale = downscale
         self.model_name      = model_name
         self.contrast_loss   = contrastive_loss
         self.sigmoid_loss    = torchvision.ops.sigmoid_focal_loss # nn.crossentropy
@@ -414,6 +466,12 @@ class SiameseModule(pl.LightningModule):
         self.accuracy_metric = classification.BinaryAccuracy()
         self.auroc_metric    = classification.BinaryAUROC()
 
+    def count_parameters(self):
+        '''Counts the number of parameters in a model'''
+        trainable = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        nontrain  = sum(p.numel() for p in self.model.parameters() if not p.requires_grad)
+        print(f'Trainable parameters: {trainable:,} | Non-trainable parameters: {nontrain:,}')
+        
     def freeze_encoder(self):
         self.trainable = [param.requires_grad for param in self.model.encoder.parameters()]
         for param in self.model.encoder.parameters():
@@ -424,6 +482,7 @@ class SiameseModule(pl.LightningModule):
         for param, status in zip(self.model.encoder.parameters(), self.trainable):
             param.requires_grad = status
         self.trainer.strategy.setup_optimizers(self.trainer)
+        self.count_parameters()
         print('Encoder unfrozen, optimisers reset')
 
     def forward(self, X:torch.Tensor) -> torch.Tensor:
@@ -433,15 +492,22 @@ class SiameseModule(pl.LightningModule):
     def training_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
         X, Y   = batch
         D, Yh  = self.model(X)
-        loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
-        loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
+        mask  = torch.isnan(Y)
+        if self.downscale > 1:
+            Y    = F.max_pool2d(torch.nan_to_num(Y, nan=0.0), kernel_size=self.downscale, stride=self.downscale)
+            mask = F.max_pool2d(mask.int(), kernel_size=self.downscale, stride=self.downscale)
+            mask = mask.bool() & ~Y.bool() # Compute loss on tiles with y=1 OR y=0 & y!=NaN
+            D    = F.avg_pool2d(D,  kernel_size=self.downscale, stride=self.downscale)
+            Yh   = F.avg_pool2d(Yh, kernel_size=self.downscale, stride=self.downscale)
+        loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask], reduction='mean')
+        loss_C = self.contrast_loss(D[~mask], Y[~mask], margin=self.margin_contrast, reduction="mean")
         train_loss = loss_S + self.weight_contrast * loss_C
         self.log('train_loss', train_loss, prog_bar=True)
         
         # Metrics
         probs = torch.sigmoid(Yh)
-        self.accuracy_metric.update(probs, Y)
-        self.auroc_metric.update(probs, Y)
+        self.accuracy_metric.update(probs[~mask], Y[~mask])
+        self.auroc_metric.update(probs[~mask], Y[~mask])
         self.log('train_acc', self.accuracy_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
         self.log('train_auroc', self.auroc_metric.compute(),  on_step=True, on_epoch=True, prog_bar=True)
         return train_loss
@@ -449,14 +515,21 @@ class SiameseModule(pl.LightningModule):
     def validation_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
         X, Y   = batch
         D, Yh  = self.model(X)
-        loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
-        loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
+        mask  = torch.isnan(Y)
+        if self.downscale > 1:
+            Y    = F.max_pool2d(torch.nan_to_num(Y, nan=0.0), kernel_size=self.downscale, stride=self.downscale)
+            mask = F.max_pool2d(mask.int(), kernel_size=self.downscale, stride=self.downscale)
+            mask = mask.bool() & ~Y.bool()
+            D    = F.avg_pool2d(D,  kernel_size=self.downscale, stride=self.downscale)
+            Yh   = F.avg_pool2d(Yh, kernel_size=self.downscale, stride=self.downscale)
+        loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask], reduction='mean')
+        loss_C = self.contrast_loss(D[~mask], Y[~mask], margin=self.margin_contrast, reduction="mean")
         val_loss = loss_S + self.weight_contrast * loss_C
         self.log('val_loss', val_loss, prog_bar=True)
         # Metrics
         probs = torch.sigmoid(Yh)
-        self.accuracy_metric.update(probs, Y)
-        self.auroc_metric.update(probs, Y)
+        self.accuracy_metric.update(probs[~mask], Y[~mask])
+        self.auroc_metric.update(probs[~mask], Y[~mask])
         self.log('val_acc', self.accuracy_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
         self.log('val_auroc', self.auroc_metric.compute(),  on_step=True, on_epoch=True, prog_bar=True)
         return val_loss
@@ -464,14 +537,21 @@ class SiameseModule(pl.LightningModule):
     def test_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
         X, Y   = batch
         D, Yh  = self.model(X)
-        loss_S = self.sigmoid_loss(Yh, Y, reduction='mean')
-        loss_C = self.contrast_loss(D, Y, margin=self.margin_contrast)
+        mask  = torch.isnan(Y)
+        if self.downscale > 1:
+            Y    = F.max_pool2d(torch.nan_to_num(Y, nan=0.0), kernel_size=self.downscale, stride=self.downscale)
+            mask = F.max_pool2d(mask.int(), kernel_size=self.downscale, stride=self.downscale)
+            mask = mask.bool() & ~Y.bool()
+            D    = F.avg_pool2d(D,  kernel_size=self.downscale, stride=self.downscale)
+            Yh   = F.avg_pool2d(Yh, kernel_size=self.downscale, stride=self.downscale)
+        loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask], reduction='mean')
+        loss_C = self.contrast_loss(D[~mask], Y[~mask], margin=self.margin_contrast, reduction="mean")
         test_loss = loss_S + self.weight_contrast * loss_C
         self.log('test_loss', test_loss, prog_bar=True)
         # Metrics
         probs = torch.sigmoid(Yh)
-        self.accuracy_metric.update(probs, Y)
-        self.auroc_metric.update(probs, Y)
+        self.accuracy_metric.update(probs[~mask], Y[~mask])
+        self.auroc_metric.update(probs[~mask], Y[~mask])
         self.log('test_acc', self.accuracy_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
         self.log('test_auroc', self.auroc_metric.compute(),  on_step=True, on_epoch=True, prog_bar=True)
         return test_loss
@@ -499,11 +579,13 @@ class SiameseModule(pl.LightningModule):
 train_datafiles = dict(zip(args.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_train_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_train_balanced.zarr') for city in args.cities]))
 valid_datafiles = dict(zip(args.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_valid_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_valid_balanced.zarr') for city in args.cities]))
 test_datafiles  = dict(zip(args.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_test_balanced.zarr',  labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_test_balanced.zarr')  for city in args.cities]))
+processor   = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
+formatter   = Formatter(processor=processor, label_map=args.label_map, image_size=processor.size['height'])
 data_module = ZarrDataModule(train_datafiles=train_datafiles, 
                              valid_datafiles=valid_datafiles, 
                              test_datafiles=test_datafiles, 
+                             formatter=formatter, 
                              batch_size=args.batch_size, 
-                             label_map=args.label_map, 
                              shuffle=True)
 del train_datafiles, valid_datafiles, test_datafiles
 
@@ -514,6 +596,7 @@ if not os.path.exists(BACKBONE_PATH):
 siamese_nn_model = SiameseModel(backbone=BACKBONE_PATH)
 model_module = SiameseModule(
     model= siamese_nn_model, 
+    downscale=7,
     model_name='destruction_finetune_siamese', 
     learning_rate=args.learning_rate,
     weight_decay=args.weight_decay,
@@ -594,9 +677,9 @@ if args.mode == 'train':
 
     fine_tune_model_checkpoint = callbacks.ModelCheckpoint(
         dirpath=fine_tune_checkpoint_dir,
-        filename=f"{model_module.model_name}-FT-{{epoch:02d}}-{{val_auroc_epoch:.4f}}", # Make sure val_auroc_epoch is logged
-        monitor='val_auroc_epoch',
-        mode='max',
+        filename=f"{model_module.model_name}-FT-{{epoch:02d}}-{{step:05d}}", # Make sure val_auroc_epoch is logged
+        monitor='step',
+        every_n_train_steps=1e3,
         save_top_k=1,
         save_last=True
     )

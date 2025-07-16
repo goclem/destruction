@@ -32,10 +32,10 @@ from torcheval import metrics
 
 home  = os.path.expanduser('~')
 paths = argparse.Namespace(
-    data='/lustre/ific.uv.es/ml/iae091/data',
-    models='/lustre/ific.uv.es/ml/iae091/models',
-    #data= "../data",
-    #models= "../models",
+    #data='/lustre/ific.uv.es/ml/iae091/data',
+    #models='/lustre/ific.uv.es/ml/iae091/models',
+    data= "../data",
+    models= "../models",
     figures='../figures',
     desktop=os.path.join(home, 'Desktop'),
     temporary=os.path.join(home, 'Desktop', 'temporary')
@@ -259,7 +259,7 @@ def shuffle_zarr(images_zarr:str, labels_zarr:str=None) -> None:
         dataset[:] = labels
 
 #%% MODEL TRAINING UTILITIES
-"""
+
 def count_parameters(model:nn.Module) -> None:
     '''Counts the number of parameters in a model'''
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -279,7 +279,7 @@ def empty_cache(device:torch.device) -> None:
         torch.cuda.empty_cache()
     if device == 'mps':
         torch.mps.empty_cache()
-
+"""
 def optimise(model:nn.Module, train_loader, device:torch.device, criterion, optimiser, accumulate:int=1) -> torch.Tensor:
     '''Optimises a model using a training sample for one epoch'''
     model.train()

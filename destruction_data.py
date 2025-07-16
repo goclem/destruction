@@ -36,7 +36,7 @@ params = argparse.Namespace(
     prepost_npre=1, #! Number of pre-images
     prepost_ratio=1,
     tile_ratio=1,
-    chunk_size=2000)     # Adjust chunk size according to your memory constraints.
+    chunk_size=500)     # Adjust chunk size according to your memory constraints.
 
 #%% COMPUTES SAMPLES
 
@@ -211,7 +211,7 @@ for sample in ['train', 'valid', 'test']:
     untouch = np.where(~destroy)[0]
     indices = np.concatenate((
         np.where(destroy)[0], # Includes all destroyed samples
-        np.random.choice(untouch, params.sequence_ratio * np.sum(destroy), replace=False)))
+        np.random.choice(untouch, params.sequence_ratio * np.sum(destroy), replace=True))) # Was false, set to true by Dominik
     
     # Writes destination datasets
     dst_images = zarr.open(dst_images, mode='w', shape=(len(indices), *src_images.shape[1:]), dtype=src_images.dtype)
@@ -291,7 +291,7 @@ for sample in ['train', 'valid', 'test']:
     untouch = np.where(~destroy)[0]
     indices = np.concatenate((
         np.where(destroy)[0],
-        np.random.choice(untouch, params.prepost_ratio * np.sum(destroy), replace=False)))
+        np.random.choice(untouch, params.prepost_ratio * np.sum(destroy), replace=True))) # Was false, set to true by Dominik
     
     # Writes destination datasets
     dst_images = zarr.open(dst_images, mode='w', shape=(len(indices), *src_images.shape[1:]), dtype=src_images.dtype)
