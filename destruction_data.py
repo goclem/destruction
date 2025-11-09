@@ -28,8 +28,8 @@ args,unknown = parser.parse_known_args()
 # Utilities
 params = argparse.Namespace(
     city=args.city, # aleppo
-    buffer_around_destruction=True,
-    reset_zarr=True,
+    buffer_around_destruction=False,
+    reset_zarr=False,
     image_size=224,
     patch_size=56, 
     sample_sizes={'train':0.50, 'val':0.25, 'test':0.25},
@@ -43,8 +43,6 @@ params = argparse.Namespace(
 
 if params.image_size % params.patch_size != 0:
     raise ValueError('Image size must be divisible by patch size')
-
-print(params.buffer_around_destruction)
 
 #%% BUILD ANALYSIS MASK, SPLIT IN TRAIN/TEST/VALIDATION AND SAVE RASTER "_samples.tif"
 

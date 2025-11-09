@@ -18,6 +18,11 @@ import transformers
 import torch
 import torchvision
 
+import zarr
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.utils.data as utils
+
 import datetime
 import csv
 import json
@@ -43,7 +48,16 @@ if torch.cuda.is_available():
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
+#device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
+
+if torch.cuda.is_available():
+    accelerator, devices = "gpu", 1
+elif torch.backends.mps.is_available():
+    accelerator, devices = "mps", 1
+else:
+    accelerator, devices = "cpu", 1
+
+device = accelerator 
 
 # --- MODIFIED ARGUMENT PARSING ---
 parser = argparse.ArgumentParser()
@@ -63,8 +77,12 @@ parser.add_argument('--weight_contrast', type=float, default=0.25, help='Weight 
 parser.add_argument('--weight_decay', type=float, default=0.05, help='Penalizes large weights to prevent overfitting.')
 parser.add_argument('--margin_contrast', type=float, default=1, help='Value that explains how strict the contrastive loss is.')
 parser.add_argument('--backbone_model', type=str, default='checkpoint-9920', help='Name of the checkpoint of the pretrained encoder.')
-# Add any other hyperparameters you want to control via CLI
+parser.add_argument('--image_size', type=int, default=224, help='Size of the input images.')
+parser.add_argument('--patch_size', type=int, default=56, help='Size of the image patches.')
+parser.set_defaults(buffer_around_destruction=True)
 
+
+# Add any other hyperparameters you want to control via CLI
 args = parser.parse_args()
 
 # Generate run_name if training and not provided
@@ -136,7 +154,7 @@ def update_experiment_overview_csv(overview_filepath: str, dict_list):
       
     subset_dict = {}
     for col in ordered_columns:
-        subset_dict[col] = save_dict[col]
+        subset_dict[col] = save_dict.get(col, "")
     
     file_exists = os.path.isfile(overview_filepath)
     try:
@@ -188,8 +206,8 @@ def run_per_city_evaluation(
     for city_name in cities_for_evaluation:
         print(f"--- Evaluating city: {city_name} ---")
         city_test_datafile_spec = {
-            'images_zarr': f'{global_paths_obj.data}/{city_name}/zarr/images_prepost_test_balanced.zarr',
-            'labels_zarr': f'{global_paths_obj.data}/{city_name}/zarr/labels_prepost_test_balanced.zarr'
+            'images_zarr': f'{global_paths_obj.data}/{city_name}/zarr/images_prepost_img{args.image_size}_pat{args.patch_size}_buf{args.buffer_around_destruction}_test_balanced.zarr',
+            'labels_zarr': f'{global_paths_obj.data}/{city_name}/zarr/labels_prepost_img{args.image_size}_pat{args.patch_size}_buf{args.buffer_around_destruction}_test_balanced.zarr'
         }
         if not os.path.exists(city_test_datafile_spec['images_zarr']) or \
            not os.path.exists(city_test_datafile_spec['labels_zarr']):
@@ -209,7 +227,7 @@ def run_per_city_evaluation(
             city_test_loader = ZarrDataLoader(
                 datafiles={city_name: city_test_datafile_spec},
                 datasets=[city_dataset],
-                label_map=current_args.label_map,
+                formatter=formatter,
                 batch_size=current_args.batch_size, # Use batch_size from args
                 shuffle=False
             )
@@ -282,8 +300,11 @@ class Formatter:
         X = X.view(-1, 3, self.image_size, self.image_size)
         X = self.processor(X, return_tensors='pt')['pixel_values']
         X = X.view(-1, 2, 3, self.image_size, self.image_size)
+        
+        # labels: make float & squeeze channel once
+        Y = Y.squeeze(1).float()  # [B, Htiles, Wtiles], values in {0,1,2,3,255}
+        
         for k, v in self.label_map.items():
-            Y = Y.squeeze(1) # Removes channel dimension
             Y = torch.where(Y == k, v, Y)
         return X, Y
 
@@ -576,9 +597,9 @@ class SiameseModule(pl.LightningModule):
 #%% INITIALISE DATA AND MODEL (Needed for both modes) ---
 
 # Initialises datasets
-train_datafiles = dict(zip(args.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_train_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_train_balanced.zarr') for city in args.cities]))
-valid_datafiles = dict(zip(args.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_valid_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_valid_balanced.zarr') for city in args.cities]))
-test_datafiles  = dict(zip(args.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_test_balanced.zarr',  labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_test_balanced.zarr')  for city in args.cities]))
+train_datafiles = dict(zip(args.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_img{args.image_size}_pat{args.patch_size}_buf{args.buffer_around_destruction}_train_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_img{args.image_size}_pat{args.patch_size}_buf{args.buffer_around_destruction}_train_balanced.zarr') for city in args.cities]))
+valid_datafiles = dict(zip(args.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_img{args.image_size}_pat{args.patch_size}_buf{args.buffer_around_destruction}_valid_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_img{args.image_size}_pat{args.patch_size}_buf{args.buffer_around_destruction}_valid_balanced.zarr') for city in args.cities]))
+test_datafiles  = dict(zip(args.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_img{args.image_size}_pat{args.patch_size}_buf{args.buffer_around_destruction}_test_balanced.zarr',  labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_img{args.image_size}_pat{args.patch_size}_buf{args.buffer_around_destruction}_test_balanced.zarr')  for city in args.cities]))
 processor   = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
 formatter   = Formatter(processor=processor, label_map=args.label_map, image_size=processor.size['height'])
 data_module = ZarrDataModule(train_datafiles=train_datafiles, 
