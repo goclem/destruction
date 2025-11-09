@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Script: vitmae_finetune_tile.sh
-# Description: The script calles the python script to train and evaluate the model.
+# Description: The script calls the python script to train and evaluate the model.
 # Author: Dominik Wielath
 # Date: 2025-02-03
 # Version: 1.0

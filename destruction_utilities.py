@@ -129,6 +129,32 @@ def center_window(source:str, size:dict) -> windows.Window:
     return window
 
 def tiled_profile(source:str, tile_size:int=224, crop_size:int=224, return_window:bool=False) -> dict:
+    """
+    Create a tiled view of a raster by cropping its extent and updating its profile for tile-based processing.
+
+    This function opens the source raster, crops its extent to the largest region (anchored at the upper-left corner) whose width and height are multiples of crop_size, and computes a corresponding rasterio window. It then updates the profile so that:
+    - width and height are expressed in number of tiles (cropped_size // tile_size)
+    - transform is adjusted so that each output pixel corresponds to a tile in the source (affine scale terms multiplied by tile_size)
+
+    Parameters:
+        source (str): Path to a raster readable by rasterio.open.
+        tile_size (int, optional): Tile size in source pixels. Each output pixel represents a tile_size x tile_size block in the source. Default is 224.
+        crop_size (int, optional): Multiple to which the source width and height are floored before tiling. Default is 224.
+        return_window (bool, optional): If True, also return the rasterio window describing the cropped region. Default is False.
+
+    Returns:
+        dict | tuple[dict, rasterio.windows.Window]:
+            A copy of the raster profile updated for the tiled view; optionally the crop window if return_window is True.
+
+    Notes:
+        - Any remainder pixels on the right and bottom edges are discarded by cropping.
+        - The transform’s scale terms (a, e) are multiplied by tile_size; the origin (c, f) is preserved at the cropped upper-left.
+        - The updated width/height are integers computed via floor division. For best alignment, choose crop_size and tile_size so that the cropped dimensions are divisible by tile_size.
+        - Only metadata is read; raster band data is not loaded.
+
+    Raises:
+        rasterio.errors.RasterioIOError: If the source cannot be opened.
+    """
     with rasterio.open(source) as raster:
         profile = raster.profile.copy()        
         width   = profile['width']  - (profile['width']  % crop_size)
@@ -142,6 +168,65 @@ def tiled_profile(source:str, tile_size:int=224, crop_size:int=224, return_windo
         else:
             return profile
 
+
+def shift_or(target, src, dy, dx, H, W):
+    """
+    Shift a 2D boolean array by at most one cell in x and/or y and OR the result into a target array.
+
+    This function performs an in-place logical OR (|=) of a shifted version of src into target.
+    The shift is specified by (dy, dx), each of which may be -1, 0, or 1. Vacated positions
+    created by the shift are filled with False (i.e., do not affect the OR operation). The
+    operation is bounded; no wrapping occurs.
+
+    Parameters
+    ----------
+    target : np.ndarray
+        2D (or leading 2D) boolean-compatible array updated in place via target |= shifted_src.
+    src : np.ndarray
+        2D (or leading 2D) boolean-compatible source array to be shifted.
+    dy : int
+        Vertical shift: -1 (up), 0 (no vertical shift), 1 (down).
+    dx : int
+        Horizontal shift: -1 (left), 0 (no horizontal shift), 1 (right).
+    H : int
+        Height (number of rows) of the 2D region; should match src.shape[0].
+    W : int
+        Width (number of columns) of the 2D region; should match src.shape[1].
+
+    Returns
+    -------
+    None
+        The function modifies target in place.
+
+    Notes
+    -----
+    - Only single-step shifts (−1, 0, 1) are supported; other values will still run but
+      produce a full copy (for 0) or truncated edges (for ±1) according to the slicing logic.
+    - The function allocates a temporary boolean array of the same shape as src.
+    """
+    if dy == -1:
+        rows_src = slice(1, H)
+        rows_dst = slice(0, H-1)
+    elif dy == 1:
+        rows_src = slice(0, H-1)
+        rows_dst = slice(1, H)
+    else:
+        rows_src = slice(0, H)
+        rows_dst = slice(0, H)
+
+    if dx == -1:
+        cols_src = slice(1, W)
+        cols_dst = slice(0, W-1)
+    elif dx == 1:
+        cols_src = slice(0, W-1)
+        cols_dst = slice(1, W)
+    else:
+        cols_src = slice(0, W)
+        cols_dst = slice(0, W)
+
+    tmp = np.zeros_like(src, dtype=bool)
+    tmp[rows_dst, cols_dst] = src[rows_src, cols_src]
+    target |= tmp
 #%% ARRAY UTILITIES
 
 def image_to_tiles(image:torch.Tensor, tile_size:int, stride:int=None):
