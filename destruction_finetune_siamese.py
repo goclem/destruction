@@ -149,7 +149,10 @@ def update_experiment_overview_csv(overview_filepath: str, dict_list):
     'max_epochs_align',
     'max_epochs_ft',
     'patience_ft',
-    'label_map'
+    'label_map',
+    'image_size',
+    'patch_size',
+    'buffer_around_destruction'
     ]
       
     subset_dict = {}
@@ -423,6 +426,45 @@ def contrastive_loss_consine_sim(similarity: torch.Tensor, label: torch.Tensor, 
     return (loss_similar + loss_dissimilar).mean()
 
 def contrastive_loss(distance:torch.Tensor, label:torch.Tensor, margin:float, reduction:str=None) -> torch.Tensor:
+    """
+    Compute the contrastive loss for a batch of pairwise distances.
+
+    This loss encourages distances between matching (similar) pairs to be small, and
+    distances between non‑matching (dissimilar) pairs to be at least a given margin.
+    It implements the classic formulation from Hadsell et al. (2006):
+
+        L = (1 - y) * d^2 + y * max(0, margin - d)^2
+
+    where:
+        d      = Euclidean (or other) distance between the paired embeddings.
+        y      = binary label (0 for similar / positive pair, 1 for dissimilar / negative pair).
+        margin = minimal desired distance between dissimilar pairs.
+
+    Parameters
+    ----------
+    distance : torch.Tensor
+    label : torch.Tensor
+            0 => similar (positive) pair: loss term is d^2.
+            1 => dissimilar (negative) pair: loss term is (max(0, margin - d))^2.
+    margin : float
+        Margin value that sets the minimal separation for dissimilar pairs. Should be > 0.
+    reduction : str, optional
+        If 'mean', returns the mean loss over the batch. If None or any other value,
+        returns the per‑sample loss tensor (no reduction).
+
+    Returns
+    -------
+    torch.Tensor
+        Scalar tensor if reduction == 'mean', else a tensor of per‑sample losses with the
+        same shape as distance.
+
+    Notes
+    -----
+    - Distances greater than the margin for dissimilar pairs incur zero loss.
+    - For similar pairs (label == 0), the loss grows quadratically with distance.
+    - Ensure distance values are non‑negative (e.g., use Euclidean norms).
+    - If you need a summed reduction, apply .sum() externally.
+    """
     loss = (1 - label) * torch.pow(distance, 2) + label * torch.pow(torch.clamp(margin - distance, min=0.0), 2)
     if reduction == 'mean':
         loss = loss.mean()
@@ -431,40 +473,48 @@ def contrastive_loss(distance:torch.Tensor, label:torch.Tensor, margin:float, re
 
 ### New Model - Transformer based
 class SiameseModel(nn.Module):
-    
-    def __init__(self, backbone:str):
+    def __init__(self, backbone: str, head_hidden=512):
         super().__init__()
-        self.encoder   = transformers.ViTModel.from_pretrained(backbone) #ViTMAEModel
-        self.model_dim = self.encoder.config.hidden_size
-        self.patch_dim = self.encoder.config.image_size // self.encoder.config.patch_size
-        self.project0  = nn.Sequential(
-            nn.Linear(self.model_dim, self.model_dim//2),
-            nn.GELU(),
-            nn.Linear(self.model_dim//2, self.model_dim//2)
-        )
-        self.project1  = nn.Sequential(
-            nn.Linear(self.model_dim, self.model_dim//2),
-            nn.GELU(),
-            nn.Linear(self.model_dim//2, self.model_dim//2)
-        )
-        self.output = nn.Linear(1, 1)
+        self.encoder = transformers.ViTModel.from_pretrained(backbone)
+        D = self.encoder.config.hidden_size           # 768
+        self.patch_dim = self.encoder.config.image_size // self.encoder.config.patch_size  # 14
 
-    def forward_branch(self, Xt:torch.Tensor) -> torch.Tensor:
-        Ht = self.encoder(Xt)
-        Ht = Ht.last_hidden_state[:, 1:, :]
-        return Ht
+        # shared projector
+        d = D // 2
+        self.proj = nn.Sequential(
+            nn.Linear(D, d), nn.GELU(),
+            nn.Linear(d, d)
+        )
 
-    def forward(self, X:torch.Tensor, Y:torch.Tensor=None) -> torch.Tensor:
-        H0 = self.forward_branch(X[:,0])
-        H0 = self.project0(H0)
-        H1 = self.forward_branch(X[:,1])
-        H1 = self.project1(H1)
-        #D  = F.cosine_similarity(H0, H1, dim=1, eps=1e-8).unsqueeze(1)
-        D  = (H0 - H1).norm(dim=-1) # L2 distance
-        Yh = self.output(D.unsqueeze(-1)).squeeze(-1)
-        D  = D.reshape(-1,  self.patch_dim, self.patch_dim)
-        Yh = Yh.reshape(-1, self.patch_dim, self.patch_dim)
-        #Yh = self.output(-D)
+        # classification head on concatenated pair features
+        self.mlp_head = nn.Sequential(
+            nn.Linear(4*d, head_hidden), nn.GELU(),
+            nn.LayerNorm(head_hidden),
+            nn.Linear(head_hidden, 1)
+        )
+
+    def _encode_tokens(self, x):  # x: [B, 3, 224, 224]
+        out = self.encoder(x).last_hidden_state  # [B, 1+196, 768]
+        return out[:, 1:, :]  # drop CLS -> [B, 196, 768]
+
+    def forward(self, X):  # X: [B, 2, 3, 224, 224]
+        x0, x1 = X[:, 0], X[:, 1]
+        H0 = self._encode_tokens(x0)            # [B,196,768]
+        H1 = self._encode_tokens(x1)            # [B,196,768]
+        H0 = self.proj(H0)                      # [B,196,d]
+        H1 = self.proj(H1)                      # [B,196,d]
+
+        # distance for contrastive loss
+        D = (H0 - H1).norm(dim=-1)              # [B,196]
+
+        # classification head
+        Z  = torch.cat([H0, H1, torch.abs(H0 - H1), H0 * H1], dim=-1)  # [B,196,4d]
+        Yh = self.mlp_head(Z).squeeze(-1)                               # [B,196]
+
+        # reshape to grids
+        B = X.size(0); P = self.patch_dim
+        D  = D.view(B, 1, P, P)      # [B,1,14,14]
+        Yh = Yh.view(B, 1, P, P)     # [B,1,14,14]
         return D, Yh
 
 
@@ -512,8 +562,15 @@ class SiameseModule(pl.LightningModule):
     
     def training_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
         X, Y   = batch
-        D, Yh  = self.model(X)
         mask  = torch.isnan(Y)
+        
+        D, Yh  = self.model(X)
+        
+        # Align predictions to labels
+        Ph, Pw = Y.shape[-2], Y.shape[-1]    # 4, 4
+        D  = F.adaptive_avg_pool2d(D,  (Ph, Pw)).squeeze(1)
+        Yh = F.adaptive_avg_pool2d(Yh, (Ph, Pw)).squeeze(1)
+
         if self.downscale > 1:
             Y    = F.max_pool2d(torch.nan_to_num(Y, nan=0.0), kernel_size=self.downscale, stride=self.downscale)
             mask = F.max_pool2d(mask.int(), kernel_size=self.downscale, stride=self.downscale)
@@ -535,8 +592,14 @@ class SiameseModule(pl.LightningModule):
 
     def validation_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
         X, Y   = batch
-        D, Yh  = self.model(X)
         mask  = torch.isnan(Y)
+        
+        D, Yh  = self.model(X)
+        
+        # Align predictions to labels
+        Ph, Pw = Y.shape[-2], Y.shape[-1]    # 4, 4
+        D  = F.adaptive_avg_pool2d(D,  (Ph, Pw)).squeeze(1)
+        Yh = F.adaptive_avg_pool2d(Yh, (Ph, Pw)).squeeze(1)
         if self.downscale > 1:
             Y    = F.max_pool2d(torch.nan_to_num(Y, nan=0.0), kernel_size=self.downscale, stride=self.downscale)
             mask = F.max_pool2d(mask.int(), kernel_size=self.downscale, stride=self.downscale)
@@ -557,8 +620,14 @@ class SiameseModule(pl.LightningModule):
     
     def test_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
         X, Y   = batch
-        D, Yh  = self.model(X)
         mask  = torch.isnan(Y)
+        
+        D, Yh  = self.model(X)
+        
+        # Align predictions to labels
+        Ph, Pw = Y.shape[-2], Y.shape[-1]    # 4, 4
+        D  = F.adaptive_avg_pool2d(D,  (Ph, Pw)).squeeze(1)
+        Yh = F.adaptive_avg_pool2d(Yh, (Ph, Pw)).squeeze(1)
         if self.downscale > 1:
             Y    = F.max_pool2d(torch.nan_to_num(Y, nan=0.0), kernel_size=self.downscale, stride=self.downscale)
             mask = F.max_pool2d(mask.int(), kernel_size=self.downscale, stride=self.downscale)
@@ -617,7 +686,7 @@ if not os.path.exists(BACKBONE_PATH):
 siamese_nn_model = SiameseModel(backbone=BACKBONE_PATH)
 model_module = SiameseModule(
     model= siamese_nn_model, 
-    downscale=7,
+    downscale=1,
     model_name='destruction_finetune_siamese', 
     learning_rate=args.learning_rate,
     weight_decay=args.weight_decay,
@@ -645,6 +714,7 @@ if args.mode == 'train':
         logger=False,
         enable_checkpointing=False
     )
+
     alignment_trainer.fit(model=model_module, datamodule=data_module)
     print("--- Alignment Stage Complete ---")
 

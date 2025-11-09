@@ -6,9 +6,9 @@
 # Date: 2025-02-03
 # Version: 1.0
 
-python3 destruction_finetune_siamese.py --cities moschun volnovakha
+#python3 destruction_finetune_siamese.py --cities volnovakha
 
-exit 0 
+#exit 0 
 
 # --- Define Hyperparameter Grids ---
 learning_rates=(1e-4 2e-4)
@@ -16,8 +16,8 @@ weights_contrast=(0.05 0.1 0.25)
 weights_decay=(0.01 0.05 0.1)
 
 # --- Define Fixed Parameters ---
-#CITIES="hostomel irpin livoberezhnyi moschun rubizhne volnovakha aleppo daraa deirezzor hama homs idlib raqqa"
-CITIES="moschun volnovakha"
+CITIES="hostomel irpin livoberezhnyi moschun rubizhne volnovakha aleppo daraa deirezzor hama homs idlib raqqa"
+#CITIES="moschun volnovakha"
 MODE="train"
 MAX_EPOCHS_ALIGN=1
 MAX_EPOCHS_FT=100
