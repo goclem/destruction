@@ -609,13 +609,13 @@ class SiameseModule(pl.LightningModule):
         loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask], reduction='mean')
         loss_C = self.contrast_loss(D[~mask], Y[~mask], margin=self.margin_contrast, reduction="mean")
         val_loss = loss_S + self.weight_contrast * loss_C
-        self.log('val_loss', val_loss, prog_bar=True)
+        self.log('val_loss', val_loss, on_step=False, on_epoch=True, prog_bar=True)
         # Metrics
         probs = torch.sigmoid(Yh)
         self.accuracy_metric.update(probs[~mask], Y[~mask])
         self.auroc_metric.update(probs[~mask], Y[~mask])
-        self.log('val_acc', self.accuracy_metric.compute(), on_step=True, on_epoch=True, prog_bar=True)
-        self.log('val_auroc', self.auroc_metric.compute(),  on_step=True, on_epoch=True, prog_bar=True)
+        self.log('val_acc', self.accuracy_metric.compute(), on_step=False, on_epoch=True, prog_bar=True)
+        self.log('val_auroc', self.auroc_metric.compute(),  on_step=False, on_epoch=True, prog_bar=True)
         return val_loss
     
     def test_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
@@ -766,15 +766,24 @@ if args.mode == 'train':
     fine_tune_checkpoint_dir = os.path.join(fine_tune_logger.log_dir, 'checkpoints')
     os.makedirs(fine_tune_checkpoint_dir, exist_ok=True)
 
-    fine_tune_model_checkpoint = callbacks.ModelCheckpoint(
-        dirpath=fine_tune_checkpoint_dir,
-        filename=f"{model_module.model_name}-FT-{{epoch:02d}}-{{step:05d}}", # Make sure val_auroc_epoch is logged
-        monitor='step',
-        every_n_train_steps=1e3,
-        save_top_k=1,
-        save_last=True
-    )
+    #fine_tune_model_checkpoint = callbacks.ModelCheckpoint(
+    #    dirpath=fine_tune_checkpoint_dir,
+    #    filename=f"{model_module.model_name}-FT-{{epoch:02d}}-{{step:05d}}", # Make sure val_auroc_epoch is logged
+    #    monitor='step',
+    #    every_n_train_steps=1e3,
+    #    save_top_k=1,
+    #    save_last=True
+    #)
     
+    fine_tune_model_checkpoint = callbacks.ModelCheckpoint(
+    dirpath=fine_tune_checkpoint_dir,
+    filename=f"{model_module.model_name}-FT-{{epoch:02d}}-{{val_auroc:.4f}}",
+    monitor="val_auroc",
+    mode="max",
+    save_top_k=1,
+    save_last=True,
+    save_on_train_epoch_end=False,   # avoid duplicate save at train epoch end
+)
     
     # -----------------------------------------------------------------------------------------------
     # Defining the early stopping
