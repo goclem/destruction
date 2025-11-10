@@ -281,7 +281,9 @@ class ZarrDataset(utils.data.Dataset):
 class ZarrDataset(utils.data.Dataset):
 
     def __init__(self, images_zarr:str, labels_zarr:str) -> None:
+        print(f"[DBG] opening images: {images_zarr}", flush=True)
         self.images = zarr.open(images_zarr, mode='r')
+        print(f"[DBG] opening labels: {labels_zarr}", flush=True)
         self.labels = zarr.open(labels_zarr, mode='r')
     
     def __len__(self) -> int:
@@ -337,9 +339,11 @@ class ZarrDataLoader:
         return len(self.data_indices) - 1
     
     def __iter__(self):
+        print("[DBG] __iter__ entered (val)", flush=True)
         self.batch_index = 0
         if self.shuffle:
             for city in self.datafiles:
+                print(f"[DBG] will shuffle {city}", flush=True)
                 print(f'Shuffling {city}', end='\r')
                 shuffle_zarr(
                     images_zarr=self.datafiles[city]['images_zarr'], 
@@ -389,7 +393,10 @@ class ZarrDataModule(pl.LightningDataModule):
         return ZarrDataLoader(datafiles=self.train_datafiles, datasets=self.train_datasets, formatter=self.formatter, batch_size=self.batch_size, shuffle=self.shuffle)
 
     def val_dataloader(self):
-        return ZarrDataLoader(datafiles=self.valid_datafiles, datasets=self.valid_datasets, formatter=self.formatter, batch_size=self.batch_size, shuffle=self.shuffle)
+        print("[DBG] building val_dataloader...", flush=True)
+        loader = ZarrDataLoader(datafiles=self.valid_datafiles, datasets=self.valid_datasets, formatter=self.formatter, batch_size=self.batch_size, shuffle=self.shuffle)
+        print("[DBG] val_dataloader built.", flush=True)
+        return loader
 
     def test_dataloader(self):
         return ZarrDataLoader(datafiles=self.test_datafiles, datasets=self.test_datasets, formatter=self.formatter, batch_size=self.batch_size, shuffle=self.shuffle)
