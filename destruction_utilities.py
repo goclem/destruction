@@ -329,6 +329,7 @@ def display_grid(images:torch.Tensor, titles:list=[''], gridsize:tuple=(3, 3), f
 
 def shuffle_zarr(images_zarr:str, labels_zarr:str=None) -> None:
     '''Shuffles a Zarr array along the first axis'''
+    print("Shuffling Zarr array...")
     # Images
     images  = zarr.open(images_zarr, mode='r')[:]
     indices = np.arange(len(images))
@@ -342,6 +343,7 @@ def shuffle_zarr(images_zarr:str, labels_zarr:str=None) -> None:
         labels  = labels[indices]
         dataset = zarr.open(labels_zarr, shape=labels.shape, dtype=labels.dtype, mode='w')
         dataset[:] = labels
+    print("Finishied shuffling.")
 
 #%% MODEL TRAINING UTILITIES
 
