@@ -6,7 +6,7 @@
 # Date: 2025-02-03
 # Version: 1.0
 
-#python3 destruction_finetune_siamese.py --cities volnovakha
+#python3 destruction_finetune_siamese.py --cities volnovakha moschun
 
 #exit 0 
 

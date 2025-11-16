@@ -20,7 +20,7 @@ from destruction_utilities import *
 
 # Define argument parser
 parser = argparse.ArgumentParser()
-parser.add_argument('--city', type=str, default='moschun', help='City name')
+parser.add_argument('--city', type=str, default='aleppo', help='City name')
 
 # Parse command-line arguments
 args,unknown = parser.parse_known_args()
@@ -126,7 +126,7 @@ for date in dates:
 
     write_raster(array=subset, profile=profile, destination=f'{paths.data}/{params.city}/labels/label_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{date}.tif')
 
-del damage, geoms, filling, defined, date, subset
+#del damage, geoms, filling, defined, date, subset
 
 
 

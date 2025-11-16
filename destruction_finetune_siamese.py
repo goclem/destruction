@@ -312,7 +312,7 @@ class Formatter:
         for k, v in self.label_map.items():
             Y = torch.where(Y == k, v, Y)
         return X, Y
-
+'''
 class ZarrDataLoader:
 
     def __init__(self, datafiles:list, datasets:list, formatter, batch_size:int, shuffle:bool=True):
@@ -370,6 +370,244 @@ class ZarrDataLoader:
         # Updates batch index
         self.batch_index += 1
         return X, Y
+
+'''
+
+class ZarrDataLoader:
+    """
+    Multi-city, block-shuffled loader with in-RAM per-epoch schedule.
+    - No on-disk shuffling.
+    - Per-batch multi-city mixing using a multinomial plan (∝ cbrt(city_size)).
+    - Reads only contiguous slices from each city (fast on Zarr/Lustre).
+    """
+
+    def __init__(self, datafiles: dict, datasets: list, formatter, batch_size: int, shuffle: bool = True,
+                 block_size: int = None, rng: np.random.Generator = None):
+        self.datafiles    = datafiles
+        self.datasets     = datasets          # list[ZarrDataset], one per city
+        self.formatter    = formatter
+        self.batch_size   = batch_size
+        self.shuffle      = shuffle
+
+        self._rng = rng or np.random.default_rng()
+        self._block_size_override = block_size  # if None, we'll pick a good default per city
+
+        # epoch/loop state
+        self._cursor = 0           # which batch in this loop
+        self._schedule = None      # list of per-batch city counts (shape [num_batches, num_cities])
+        self._city_streams = None  # per-city stream state for taking contiguous ranges
+
+        # convenience
+        self._num_cities = len(self.datasets)
+        self._sizes = np.array([len(ds) for ds in self.datasets], dtype=int)
+
+    # ---------------------------
+    # Helpers for per-epoch setup
+    # ---------------------------
+
+    @staticmethod
+    def _make_blocks(N: int, B: int):
+        """Return a list of contiguous half-open ranges [(s, e), ...] that cover [0, N) with step B."""
+        if N <= 0:
+            return []
+        B = max(1, min(B, N))
+        return [(s, min(s + B, N)) for s in range(0, N, B)]
+
+    def _pick_block_size(self, j: int) -> int:
+        """
+        Choose a block size B for city j:
+        - Aim for B ≈ k * chunk0 (k small), so reads stay chunk-aligned.
+        - Ensure B >= 4 * batch_size for good amortization.
+        - Cap by dataset length to avoid oversizing small cities.
+        """
+        N_j = len(self.datasets[j])
+        if N_j <= 0:
+            return 0
+
+        # 1) Allow a manual override
+        if self._block_size_override:
+            return int(min(max(int(self._block_size_override), self.batch_size), N_j))
+
+        # 2) Baseline target
+        B_min = max(4 * self.batch_size, self.batch_size)
+
+        # 3) Try to align to sample-axis chunk length for BOTH arrays
+        def first_axis_chunk(arr):
+            ch = getattr(arr, "chunks", None)
+            if isinstance(ch, tuple) and isinstance(ch[0], (int, np.integer)) and ch[0] > 0:
+                return int(ch[0])
+            return 0
+
+        img_c0 = first_axis_chunk(self.datasets[j].images)
+        lbl_c0 = first_axis_chunk(self.datasets[j].labels)
+
+        # Prefer the smaller chunk among images/labels so we don’t force
+        # the other array to read many extra chunks.
+        base = min([c for c in (img_c0, lbl_c0) if c > 0], default=0)
+
+        if base > 0:
+            # Choose a small multiple of the chunk size, large enough to reach B_min
+            k = math.ceil(B_min / base)
+            k = max(1, min(k, 4))  # keep it within 1–4 chunks to avoid huge blocks
+            B = base * k
+        else:
+            # Unknown chunking → fall back to B_min
+            B = B_min
+
+        # 4) Final clamps: at least one batch, at most city size
+        B = max(self.batch_size, min(B, N_j))
+        return B
+
+    def _build_city_block_streams(self):
+        """
+        Build per-city randomized block streams.
+        A stream is a dict with:
+          - blocks: list[(s,e)] contiguous ranges in a random order (or natural if !shuffle)
+          - i: current block index
+          - off: current offset within current block
+          - N: total samples
+        """
+        streams = []
+        for j, ds in enumerate(self.datasets):
+            N = len(ds)
+            if N == 0:
+                streams.append({"blocks": [], "i": 0, "off": 0, "N": 0})
+                continue
+            B = self._pick_block_size(j)
+            blocks = self._make_blocks(N, B)
+            if self.shuffle:
+                self._rng.shuffle(blocks)  # random order of blocks (preserves contiguous reads)
+            streams.append({"blocks": blocks, "i": 0, "off": 0, "N": N})
+        return streams
+
+    def _city_take(self, j: int, n: int):
+        """
+        Take 'n' samples from city j's stream as one or more contiguous slices.
+        Returns a list of (start, end) half-open ranges. Advances the stream cursor.
+        """
+        res = []
+        if n <= 0:
+            return res
+
+        st = self._city_streams[j]
+        blocks = st["blocks"]
+        i = st["i"]
+        off = st["off"]
+
+        while n > 0 and i < len(blocks):
+            bs, be = blocks[i]
+            a = bs + off
+            remain = be - a
+            if remain <= 0:  # move to next block
+                i += 1
+                off = 0
+                continue
+
+            if n <= remain:
+                res.append((a, a + n))
+                off += n
+                n = 0
+            else:
+                res.append((a, be))  # consume remainder of this block
+                n -= remain
+                i += 1
+                off = 0
+
+        # Update stream cursor
+        st["i"] = i
+        st["off"] = off
+
+        if n > 0:
+            # Not enough data left for this city; caller ensures plan fits, so this shouldn't happen.
+            raise RuntimeError(f"City {j}: requested more samples than available.")
+
+        return res
+
+    def _build_mixing_schedule(self):
+        """
+        Build per-batch city counts with a multinomial draw per batch.
+        Probabilities p_j ∝ cbrt(city_size_j).
+        Trim the schedule so no city exceeds its available samples.
+        Returns: counts array of shape [num_batches, num_cities].
+        """
+        sizes = self._sizes
+        J = self._num_cities
+        if sizes.sum() == 0:
+            return np.zeros((0, J), dtype=int)
+
+        # probs ∝ cube-root of size (prevents giant cities from dominating)
+        w = np.cbrt(sizes.astype(float))
+        p = w / w.sum()
+
+        # optimistic upper bound on batches: roughly max(N_j)/batch_size
+        max_batches = int(np.max(np.ceil(sizes / max(1, self.batch_size))))
+        if max_batches <= 0:
+            return np.zeros((0, J), dtype=int)
+
+        counts = self._rng.multinomial(self.batch_size, p, size=max_batches)  # [Batches, J]
+
+        # Convert to cumulative used per city and drop any row that would overflow a city
+        cumsum = counts.cumsum(axis=0)
+        mask_ok = np.all(cumsum <= sizes, axis=1)
+        # keep only the prefix up to the last True
+        if not mask_ok.any():
+            return np.zeros((0, J), dtype=int)
+        last_ok = np.argmax(~mask_ok) - 1 if (~mask_ok).any() else len(mask_ok) - 1
+        counts = counts[:last_ok + 1]
+
+        # Remove batches that ended up assigning 0 items (rare but harmless)
+        counts = counts[np.sum(counts, axis=1) > 0]
+        return counts
+
+    # ---------------------------
+    # Iterator protocol
+    # ---------------------------
+
+    def __iter__(self):
+        # Reset per-loop state
+        self._cursor = 0
+
+        # Build per-city block streams (random order if shuffle=True; natural order otherwise)
+        self._city_streams = self._build_city_block_streams()
+
+        # Build mixing schedule (counts per batch per city)
+        if not self.shuffle:
+            # Deterministic: pack each city into contiguous batches in natural order.
+            # Still yields multi-city batches if you want: we can do a multinomial with fixed seed 0.
+            self._rng = np.random.default_rng(0)
+        self._schedule = self._build_mixing_schedule()  # shape [num_batches, num_cities]
+
+        return self
+
+    def __len__(self):
+        return 0 if self._schedule is None else int(self._schedule.shape[0])
+
+    def __next__(self):
+        if self._schedule is None or self._cursor >= len(self):
+            raise StopIteration
+
+        counts = self._schedule[self._cursor]  # counts per city for this batch
+        self._cursor += 1
+
+        X_parts, Y_parts = [], []
+        # For each city, take 'n' samples from its block stream as contiguous slices
+        for j, n in enumerate(counts):
+            if n <= 0:
+                continue
+            # take n samples as one or more contiguous slices
+            for (a, b) in self._city_take(j, int(n)):
+                Xab, Yab = self.datasets[j][a:b]  # contiguous slice from Zarr (fast)
+                X_parts.append(Xab)
+                Y_parts.append(Yab)
+
+        # Concat across cities for this batch
+        X = torch.cat(X_parts, dim=0) if len(X_parts) > 1 else X_parts[0]
+        Y = torch.cat(Y_parts, dim=0) if len(Y_parts) > 1 else Y_parts[0]
+
+        # Format (normalize + label remap)
+        X, Y = self.formatter(X, Y)
+        return X, Y
+
 
 
 class ZarrDataModule(pl.LightningDataModule):
