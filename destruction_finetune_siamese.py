@@ -200,7 +200,7 @@ def run_per_city_evaluation(
         return
 
     model_to_eval.eval()
-    model_to_eval.to(device)
+    #model_to_eval.to(device)
 
     eval_trainer = pl.Trainer(accelerator=device, logger=False)
     all_city_results = {}
