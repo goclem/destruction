@@ -1165,11 +1165,66 @@ if os.path.exists(hparams_file):
     with open(hparams_file, 'r') as f:
         hparams = yaml.unsafe_load(f)
 
+def pick_col(df, names):
+    for n in names:
+        if n in df.columns:
+            return n
+    return None
+
 #%%
 if os.path.exists(metrics_file):
     try:
         metrics_df = pd.read_csv(metrics_file)
 
+        # pick column names that exist
+        val_auc_col  = pick_col(metrics_df, ["val_auroc_epoch", "val_auroc"])
+        val_acc_col  = pick_col(metrics_df, ["val_acc_epoch",   "val_acc"])
+        val_loss_col = pick_col(metrics_df, ["val_loss_epoch",  "val_loss"])
+
+        train_auc_col = pick_col(metrics_df, ["train_auroc_epoch", "train_auroc"])
+        train_acc_col = pick_col(metrics_df, ["train_acc_epoch",   "train_acc"])
+
+        test_auc_col = pick_col(metrics_df, ["test_auroc_epoch", "test_auroc"])
+        test_acc_col = pick_col(metrics_df, ["test_acc_epoch",   "test_acc"])
+        test_loss_col = pick_col(metrics_df, ["test_loss_epoch", "test_loss"])
+
+        if val_auc_col is None:
+            raise ValueError(f"No validation AUROC column found. Columns: {list(metrics_df.columns)}")
+
+        # choose best epoch by validation AUROC (aggregate over duplicates if any)
+        best = (metrics_df
+                .dropna(subset=[val_auc_col])
+                .sort_values(val_auc_col, ascending=False)
+                .iloc[0])
+
+        best_epoch = int(best["epoch"])
+
+        best_validation = {
+            "epoch": best_epoch,
+            "val_acc_epoch":  best[val_acc_col]  if val_acc_col  else None,
+            "val_auroc_epoch":best[val_auc_col],
+            "val_loss":       best[val_loss_col] if val_loss_col else None,
+        }
+
+        # grab train metrics for that epoch, if present
+        train_row = metrics_df.loc[metrics_df["epoch"]==best_epoch].tail(1)
+        best_train = {
+            "train_acc_epoch":  train_row[train_acc_col].values[0] if train_acc_col and not train_row.empty else None,
+            "train_auroc_epoch":train_row[train_auc_col].values[0] if train_auc_col and not train_row.empty else None,
+        }
+
+        # grab test metrics (usually last row(s) written after test finishes)
+        test_rows = metrics_df.dropna(subset=[c for c in [test_acc_col, test_auc_col, test_loss_col] if c])
+        best_test = {
+            "test_acc_epoch":  test_rows[test_acc_col].iloc[-1]  if test_acc_col  and not test_rows.empty else None,
+            "test_auroc_epoch":test_rows[test_auc_col].iloc[-1]  if test_auc_col and not test_rows.empty else None,
+            "test_loss":       test_rows[test_loss_col].iloc[-1] if test_loss_col and not test_rows.empty else None,
+        }
+
+        # merge into your extracted dict
+        extracted_metrics_dict = {**best_validation, **best_train, **best_test}
+
+        '''
         # Extract the validation metrics for the best epoch
         best_validation_df = metrics_df.iloc[[metrics_df["val_auroc_epoch"].idxmax()]]
         best_validation_df = best_validation_df[["epoch", "val_acc_epoch", "val_auroc_epoch", "val_loss"]].reset_index(drop=True)
@@ -1187,7 +1242,7 @@ if os.path.exists(metrics_file):
         extracted_metrics_dict = {}
         for col in extracted_metrics_df.columns:
             extracted_metrics_dict[col] = extracted_metrics_df[col].values[0]
-        
+        '''
     except Exception as e:
         print(f"Warning: Could not read/select fine-tuning metrics from {metrics_file}: {e}")
         
