@@ -79,7 +79,7 @@ parser.add_argument('--margin_contrast', type=float, default=1, help='Value that
 parser.add_argument('--backbone_model', type=str, default='checkpoint-9920', help='Name of the checkpoint of the pretrained encoder.')
 parser.add_argument('--image_size', type=int, default=224, help='Size of the input images.')
 parser.add_argument('--patch_size', type=int, default=56, help='Size of the image patches.')
-parser.set_defaults(buffer_around_destruction=True)
+parser.set_defaults(buffer_around_destruction=False)
 
 
 # Add any other hyperparameters you want to control via CLI
