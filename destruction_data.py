@@ -29,9 +29,10 @@ args,unknown = parser.parse_known_args()
 params = argparse.Namespace(
     city=args.city, # aleppo
     buffer_around_destruction=False,
+    buffer_around_destruction_DISTANCE=1, # in patches
     reset_zarr=False,
     image_size=224,
-    patch_size=56, 
+    patch_size=32, 
     sample_sizes={'train':0.50, 'val':0.25, 'test':0.25},
     label_map={0:0, 1:0, 2:1, 3:1, 255:torch.tensor(float('nan'))},
     sequence_ratio=1,
@@ -115,11 +116,22 @@ for date in dates:
         pos = np.isin(arr, keys_equal_one)
 
         H, W = pos.shape
-        nbr = np.zeros_like(pos, dtype=bool)
-            
-        for dy, dx in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(-1,1),(1,-1),(1,1)]:
-            shift_or(nbr, pos, dy, dx, H, W)
+        neighbors8 = [(-1,0),(1,0),(0,-1),(0,1),
+                      (-1,-1),(-1,1),(1,-1),(1,1)]
+        # --- radius 1 dilation ---
+        nbr1 = np.zeros_like(pos, dtype=bool)
+        for dy, dx in neighbors8:
+            shift_or(nbr1, pos, dy, dx, H, W)
 
+        nbr = nbr1
+        if params.buffer_around_destruction_DISTANCE == 2:
+            # --- radius 2 dilation (dilate nbr1 further) ---
+            nbr2 = np.zeros_like(pos, dtype=bool)
+            for dy, dx in neighbors8:
+                shift_or(nbr2, nbr1 | pos, dy, dx, H, W)  # include original pos so growth is from all radius-1 pixels
+
+            nbr = nbr1 | nbr2
+            
         out = arr.copy()
         out[nbr & ~pos] = 255
         subset = out[..., None]
