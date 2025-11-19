@@ -28,7 +28,7 @@ args,unknown = parser.parse_known_args()
 # Utilities
 params = argparse.Namespace(
     city=args.city, # aleppo
-    buffer_around_destruction=False,
+    buffer_around_destruction=True,
     buffer_around_destruction_DISTANCE=1, # in patches
     reset_zarr=False,
     image_size=224,
