@@ -78,8 +78,8 @@ parser.add_argument('--weight_decay', type=float, default=0.05, help='Penalizes 
 parser.add_argument('--margin_contrast', type=float, default=1, help='Value that explains how strict the contrastive loss is.')
 parser.add_argument('--backbone_model', type=str, default='checkpoint-9920', help='Name of the checkpoint of the pretrained encoder.')
 parser.add_argument('--image_size', type=int, default=224, help='Size of the input images.')
-parser.add_argument('--patch_size', type=int, default=56, help='Size of the image patches.')
-parser.set_defaults(buffer_around_destruction=False)
+parser.add_argument('--patch_size', type=int, default=32, help='Size of the image patches.')
+parser.set_defaults(buffer_around_destruction=True)
 
 
 # Add any other hyperparameters you want to control via CLI
@@ -812,7 +812,7 @@ class SiameseModule(pl.LightningModule):
         D, Yh  = self.model(X)
         
         # Align predictions to labels
-        Ph, Pw = Y.shape[-2], Y.shape[-1]    # 4, 4
+        Ph, Pw = Y.shape[-2], Y.shape[-1]    # 7, 7
         D  = F.adaptive_avg_pool2d(D,  (Ph, Pw)).squeeze(1)
         Yh = F.adaptive_avg_pool2d(Yh, (Ph, Pw)).squeeze(1)
 
