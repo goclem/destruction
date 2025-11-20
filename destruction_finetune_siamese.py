@@ -70,7 +70,7 @@ parser.add_argument('--eval_cities', nargs='+', type=str, default=None, help='Ci
 # hyperparameters
 parser.add_argument('--max_epochs_align', type=int, default=1, help='Max epochs for the alignment (frozen encoder) training stage.')
 parser.add_argument('--max_epochs_ft', type=int, default=100, help='Max epochs for the fine-tuning (unfrozen encoder) stage.')
-parser.add_argument('--patience_ft', type=int, default=2, help='Early stopping patience for the fine-tuning stage.') # Increased default
+parser.add_argument('--patience_ft', type=int, default=3, help='Early stopping patience for the fine-tuning stage.') # Increased default
 parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate for the optimizer.')
 parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training and evaluation.')
 parser.add_argument('--weight_contrast', type=float, default=0.25, help='Weight for the contrastive loss component.')
@@ -1033,10 +1033,17 @@ if args.mode == 'train':
     # -----------------------------------------------------------------------------------------------
     # Defining the early stopping
      
-    fine_tune_early_stopping = callbacks.EarlyStopping(
-        monitor='val_loss', mode='min', patience=args.patience_ft, verbose=True
-    )
+    #fine_tune_early_stopping = callbacks.EarlyStopping(
+    #    monitor='val_loss', mode='min', patience=args.patience_ft, verbose=True
+    #)
     
+    fine_tune_early_stopping = callbacks.EarlyStopping(
+        monitor='val_auroc',
+        mode='max',
+        patience=args.patience_ft,
+        min_delta=0.001,
+        verbose=True,
+    )
     
     # -----------------------------------------------------------------------------------------------
     # Start training
