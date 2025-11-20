@@ -6,9 +6,9 @@
 # Date: 2025-02-03
 # Version: 1.0
 
-python3 destruction_finetune_siamese.py --cities damascus
+#python3 destruction_finetune_siamese.py --cities damascus
 
-exit 0 
+#exit 0 
 
 # --- Define Hyperparameter Grids ---
 learning_rates=(1e-4 2e-4)

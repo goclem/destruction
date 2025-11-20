@@ -71,6 +71,21 @@ del profile, index, samples, analysis
 # Reads damage reports
 damage = search_data(pattern=f'{params.city}_damage.*gpkg$')[0]
 damage = gpd.read_file(damage)
+damage = damage.reindex(sorted(damage.columns), axis=1)
+
+# All date columns = everything except 'geometry'
+value_cols = damage.columns.drop('geometry')
+
+# 1. Turn 0 into NaN so they can be filled from the left
+# 2. Forward-fill along the row (axis=1)
+# 3. Turn NaNs back into 0
+damage[value_cols] = (
+    damage[value_cols]
+      .replace(0, np.nan)      # 0 → NaN
+      .ffill(axis=1)           # forward-fill across columns
+      .fillna(0)               # leading NaNs (before first positive) back to 0
+      .astype(int)             # optional, if you want ints again
+)
 
 # Extract images dates (pre and post combined)
 #dates = search_data(pattern=pattern(city=params.city, type='image'))
