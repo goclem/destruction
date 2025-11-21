@@ -535,7 +535,7 @@ class ZarrDataLoader:
 
         return res
 
-    def _build_mixing_schedule(self):
+    '''def _build_mixing_schedule(self):
         """
         Build per-batch city counts with a multinomial draw per batch.
         Probabilities p_j ∝ cbrt(city_size_j).
@@ -571,6 +571,59 @@ class ZarrDataLoader:
         # Remove batches that ended up assigning 0 items (rare but harmless)
         counts = counts[np.sum(counts, axis=1) > 0]
         return counts
+    '''
+    
+    def _build_mixing_schedule(self):
+        """
+        Build per-batch city counts in a way that:
+        - Uses *all* samples of *all* cities exactly once per epoch (no truncation),
+        - Respects self.shuffle (shuffles global sample order if True),
+        - Keeps the existing `_city_take` logic valid (no city is over-requested).
+
+        Returns
+        -------
+        counts : np.ndarray of shape [num_batches, num_cities]
+            counts[b, j] = how many samples from city j go into batch b.
+        """
+        sizes = self._sizes          # array([N_0, N_1, ..., N_{J-1}])
+        J = self._num_cities
+        N_total = int(sizes.sum())
+
+        if N_total == 0 or J == 0:
+            return np.zeros((0, J), dtype=int)
+
+        # 1. Build a global array of city IDs, one entry per sample
+        #    e.g. [0,0,0,...,1,1,...,2,2,...]
+        city_ids = np.concatenate([
+            np.full(N_j, j, dtype=np.int64)
+            for j, N_j in enumerate(sizes)
+            if N_j > 0
+        ])
+
+        # 2. Shuffle globally if requested
+        if self.shuffle:
+            self._rng.shuffle(city_ids)
+
+        # 3. Split into batches of at most batch_size
+        batch_size = int(self.batch_size)
+        num_batches = int(np.ceil(N_total / batch_size))
+
+        counts = np.zeros((num_batches, J), dtype=int)
+
+        for b in range(num_batches):
+            start = b * batch_size
+            end   = min(N_total, (b + 1) * batch_size)
+            batch_ids = city_ids[start:end]           # city indices for this batch
+            # Count occurrences per city
+            counts[b] = np.bincount(batch_ids, minlength=J)
+
+        # We allow the last batch to be smaller than batch_size; that's fine.
+        # Each city j satisfies sum_b counts[b, j] == sizes[j], so `_city_take`
+        # will consume each city's stream exactly once, and never overflow.
+        return counts
+
+    
+    
 
     # ---------------------------
     # Iterator protocol
