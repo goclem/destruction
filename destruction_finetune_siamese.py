@@ -410,28 +410,39 @@ class ZarrDataLoader:
         """Return a list of contiguous half-open ranges [(s, e), ...] that cover [0, N) with step B."""
         if N <= 0:
             return []
+        # block size is at least 1 and at most N
         B = max(1, min(B, N))
+        # split the indices into blocks of size B, last block may be smaller
         return [(s, min(s + B, N)) for s in range(0, N, B)]
 
     def _pick_block_size(self, j: int) -> int:
         """
-        Choose a block size B for city j:
-        - Aim for B ≈ k * chunk0 (k small), so reads stay chunk-aligned.
-        - Ensure B >= 4 * batch_size for good amortization.
-        - Cap by dataset length to avoid oversizing small cities.
+        Chooses a contiguous block size (B) for city j based on a baseline (base) and the zarr chunk size (min_chunk_size).
+        
+        The baseline is base = 4 * batch_size.
+        The smaller chunk size along the sample axis for images and labels is min_chunk_size.
+        If no chunk info exists, it just uses base.
+        
+        The function picks a small integer multiplier k = ceil(base/min_chunk_size) clamped to [1,4], so B = min_chunk_size * k. 
+        So if:
+        - min_chunk_size >= base, it picks B = min_chunk_size (1 chunk)    
+        - min_chunk_size in [base/4, base), it picks B = 2*min_chunk_size or 3*min_chunk_size or 4*min_chunk_size
+        - min_chunk_size < base/4, it picks B = 4*min_chunk_size and later clamps to batch size (base/4)
+        
+        Finally, it clamps B to be at least batch_size and at most the number of samples in that city.
         """
         N_j = len(self.datasets[j])
         if N_j <= 0:
             return 0
 
-        # 1) Allow a manual override
+        # 1) Allow a manual override of at least batch size at most N_j
         if self._block_size_override:
             return int(min(max(int(self._block_size_override), self.batch_size), N_j))
 
-        # 2) Baseline target
-        B_min = max(4 * self.batch_size, self.batch_size)
+        # 2) Set baseline block size to 4 x batch_size
+        base = 4 * self.batch_size
 
-        # 3) Try to align to sample-axis chunk length for BOTH arrays
+        # 3) Get zarr chunk size from images/labels
         def first_axis_chunk(arr):
             ch = getattr(arr, "chunks", None)
             if isinstance(ch, tuple) and isinstance(ch[0], (int, np.integer)) and ch[0] > 0:
@@ -441,20 +452,20 @@ class ZarrDataLoader:
         img_c0 = first_axis_chunk(self.datasets[j].images)
         lbl_c0 = first_axis_chunk(self.datasets[j].labels)
 
-        # Prefer the smaller chunk among images/labels so we don’t force
-        # the other array to read many extra chunks.
-        base = min([c for c in (img_c0, lbl_c0) if c > 0], default=0)
+        # 4) Take the minimum out of the label and image chunk sizes
+        min_chunk_size = min([c for c in (img_c0, lbl_c0) if c > 0], default=0)
 
-        if base > 0:
-            # Choose a small multiple of the chunk size, large enough to reach B_min
-            k = math.ceil(B_min / base)
+        # check if the minimum is larger zero
+        if min_chunk_size > 0:
+            # Choose a small multiple of the chunk size, large enough to reach base
+            k = math.ceil(base / min_chunk_size)
             k = max(1, min(k, 4))  # keep it within 1–4 chunks to avoid huge blocks
-            B = base * k
+            B = min_chunk_size * k
         else:
-            # Unknown chunking → fall back to B_min
-            B = B_min
+            # Unknown chunking → fall back to base
+            B = base
 
-        # 4) Final clamps: at least one batch, at most city size
+        # 5) Final clamps: at least one batch, at most city size
         B = max(self.batch_size, min(B, N_j))
         return B
 
@@ -462,7 +473,8 @@ class ZarrDataLoader:
         """
         Build per-city randomized block streams.
         A stream is a dict with:
-          - blocks: list[(s,e)] contiguous ranges in a random order (or natural if !shuffle)
+          - blocks: list[(s,e)] contiguous ranges (eg. [(1,10), (11,20), (21,25)] )
+                - if shuffle: random order of blocks; else natural order
           - i: current block index
           - off: current offset within current block
           - N: total samples
@@ -536,7 +548,8 @@ class ZarrDataLoader:
             return np.zeros((0, J), dtype=int)
 
         # probs ∝ cube-root of size (prevents giant cities from dominating)
-        w = np.cbrt(sizes.astype(float))
+        #w = np.cbrt(sizes.astype(float))
+        w = sizes
         p = w / w.sum()
 
         # optimistic upper bound on batches: roughly max(N_j)/batch_size
