@@ -70,7 +70,7 @@ parser.add_argument('--eval_cities', nargs='+', type=str, default=None, help='Ci
 # hyperparameters
 parser.add_argument('--max_epochs_align', type=int, default=1, help='Max epochs for the alignment (frozen encoder) training stage.')
 parser.add_argument('--max_epochs_ft', type=int, default=100, help='Max epochs for the fine-tuning (unfrozen encoder) stage.')
-parser.add_argument('--patience_ft', type=int, default=3, help='Early stopping patience for the fine-tuning stage.') # Increased default
+parser.add_argument('--patience_ft', type=int, default=2, help='Early stopping patience for the fine-tuning stage.') # Increased default
 parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate for the optimizer.')
 parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training and evaluation.')
 parser.add_argument('--weight_contrast', type=float, default=0.25, help='Weight for the contrastive loss component.')
@@ -632,12 +632,12 @@ class ZarrDataModule(pl.LightningDataModule):
 
     def val_dataloader(self):
         print("[DBG] building val_dataloader...", flush=True)
-        loader = ZarrDataLoader(datafiles=self.valid_datafiles, datasets=self.valid_datasets, formatter=self.formatter, batch_size=self.batch_size, shuffle=self.shuffle)
+        loader = ZarrDataLoader(datafiles=self.valid_datafiles, datasets=self.valid_datasets, formatter=self.formatter, batch_size=self.batch_size, shuffle=False)
         print("[DBG] val_dataloader built.", flush=True)
         return loader
 
     def test_dataloader(self):
-        return ZarrDataLoader(datafiles=self.test_datafiles, datasets=self.test_datasets, formatter=self.formatter, batch_size=self.batch_size, shuffle=self.shuffle)
+        return ZarrDataLoader(datafiles=self.test_datafiles, datasets=self.test_datasets, formatter=self.formatter, batch_size=self.batch_size, shuffle=False)
 
 
 def unprocess_image(image:torch.Tensor, processor) -> torch.Tensor:
