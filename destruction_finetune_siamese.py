@@ -882,139 +882,116 @@ class SiameseModule(pl.LightningModule):
         Y = self.model(X)
         return Y
     
-    def training_step(self, batch: tuple, batch_idx: int) -> torch.Tensor:
-        X, Y = batch                        # Y: [B, H, W] with {0,1,NaN}
-        mask = torch.isnan(Y)               # True = ignore
-
-        D, Yh = self.model(X)               # D, Yh: [B, 1, 14, 14]
-
+    def training_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
+        X, Y   = batch
+        mask  = torch.isnan(Y)
+        
+        D, Yh  = self.model(X)
+        
         # Align predictions to labels
-        Ph, Pw = Y.shape[-2], Y.shape[-1]
-        D  = F.adaptive_avg_pool2d(D,  (Ph, Pw)).squeeze(1)   # [B, Ph, Pw]
-        Yh = F.adaptive_avg_pool2d(Yh, (Ph, Pw)).squeeze(1)   # [B, Ph, Pw]
+        Ph, Pw = Y.shape[-2], Y.shape[-1]    # 7, 7
+        D  = F.adaptive_avg_pool2d(D,  (Ph, Pw)).squeeze(1)
+        Yh = F.adaptive_avg_pool2d(Yh, (Ph, Pw)).squeeze(1)
 
         if self.downscale > 1:
-            Y    = F.max_pool2d(torch.nan_to_num(Y, nan=0.0),
-                                kernel_size=self.downscale, stride=self.downscale)
-            mask = F.max_pool2d(mask.int(), kernel_size=self.downscale,
-                                stride=self.downscale).bool()
-            mask = mask & ~Y.bool()
+            Y    = F.max_pool2d(torch.nan_to_num(Y, nan=0.0), kernel_size=self.downscale, stride=self.downscale)
+            mask = F.max_pool2d(mask.int(), kernel_size=self.downscale, stride=self.downscale)
+            mask = mask.bool() & ~Y.bool() # Compute loss on tiles with y=1 OR y=0 & y!=NaN
             D    = F.avg_pool2d(D,  kernel_size=self.downscale, stride=self.downscale)
             Yh   = F.avg_pool2d(Yh, kernel_size=self.downscale, stride=self.downscale)
 
-        # ----- losses -----
         loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask], reduction='mean')
-        loss_C = self.contrast_loss(D[~mask], Y[~mask],
-                                    margin=self.margin_contrast, reduction="mean")
+        loss_C = self.contrast_loss(D[~mask], Y[~mask], margin=self.margin_contrast, reduction="mean")
         train_loss = loss_S + self.weight_contrast * loss_C
+        self.log('train_loss', train_loss, prog_bar=True, on_step=False, on_epoch=True)
 
-        # ----- metrics on valid patches (patch-level) -----
-        probs   = torch.sigmoid(Yh)         # [B, Ph, Pw]
-        y_true  = Y[~mask]                  # 1D tensor of valid patches
-        y_pred  = probs[~mask]              # same shape
+        # Metrics
+        probs = torch.sigmoid(Yh)
+        valid = ~mask
+        if valid.any():
+            self.train_acc.update(probs[valid], Y[valid])
+            self.train_auroc.update(probs[valid], Y[valid])
 
-        # update train metrics
-        self.train_acc.update(y_pred, y_true)
-        self.train_auroc.update(y_pred, y_true)
-
-        # log loss every step + epoch average
-        self.log('train_loss', train_loss,
-                on_step=True, on_epoch=True, prog_bar=True,
-                batch_size=y_true.numel())
-
-        # log epoch metrics via metric objects (Lightning will call .compute())
-        self.log('train_acc_epoch',  self.train_acc,
-                on_step=False, on_epoch=True, prog_bar=True)
-        self.log('train_auroc_epoch', self.train_auroc,
-                on_step=False, on_epoch=True, prog_bar=True)
+        # log metric objects; lightning will call compute() at epoch end
+        self.log('train_acc_epoch',  self.train_acc,  on_step=False, on_epoch=True, prog_bar=True)
+        self.log('train_auroc_epoch', self.train_auroc, on_step=False, on_epoch=True, prog_bar=True)
 
         return train_loss
 
-    def validation_step(self, batch: tuple, batch_idx: int) -> torch.Tensor:
-        X, Y = batch
-        mask = torch.isnan(Y)
 
-        D, Yh = self.model(X)
-
-        Ph, Pw = Y.shape[-2], Y.shape[-1]
+    def validation_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
+        X, Y   = batch
+        mask  = torch.isnan(Y)
+        
+        D, Yh  = self.model(X)
+        
+        # Align predictions to labels
+        Ph, Pw = Y.shape[-2], Y.shape[-1]    # e.g. 4, 4
         D  = F.adaptive_avg_pool2d(D,  (Ph, Pw)).squeeze(1)
         Yh = F.adaptive_avg_pool2d(Yh, (Ph, Pw)).squeeze(1)
 
         if self.downscale > 1:
-            Y    = F.max_pool2d(torch.nan_to_num(Y, nan=0.0),
-                                kernel_size=self.downscale, stride=self.downscale)
-            mask = F.max_pool2d(mask.int(), kernel_size=self.downscale,
-                                stride=self.downscale).bool()
-            mask = mask & ~Y.bool()
+            Y    = F.max_pool2d(torch.nan_to_num(Y, nan=0.0), kernel_size=self.downscale, stride=self.downscale)
+            mask = F.max_pool2d(mask.int(), kernel_size=self.downscale, stride=self.downscale)
+            mask = mask.bool() & ~Y.bool()
             D    = F.avg_pool2d(D,  kernel_size=self.downscale, stride=self.downscale)
             Yh   = F.avg_pool2d(Yh, kernel_size=self.downscale, stride=self.downscale)
 
         loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask], reduction='mean')
-        loss_C = self.contrast_loss(D[~mask], Y[~mask],
-                                    margin=self.margin_contrast, reduction="mean")
+        loss_C = self.contrast_loss(D[~mask], Y[~mask], margin=self.margin_contrast, reduction="mean")
         val_loss = loss_S + self.weight_contrast * loss_C
 
-        self.log('val_loss', val_loss,
-                on_step=False, on_epoch=True, prog_bar=True,
-                batch_size=(~mask).sum().item())
+        self.log('val_loss', val_loss, on_step=False, on_epoch=True, prog_bar=True)
 
-        # metrics
-        probs   = torch.sigmoid(Yh)
-        y_true  = Y[~mask]
-        y_pred  = probs[~mask]
+        # Metrics
+        probs = torch.sigmoid(Yh)
+        valid = ~mask
+        if valid.any():
+            self.val_acc.update(probs[valid], Y[valid])
+            self.val_auroc.update(probs[valid], Y[valid])
 
-        self.val_acc.update(y_pred, y_true)
-        self.val_auroc.update(y_pred, y_true)
-
-        self.log('val_acc_epoch',  self.val_acc,
-                on_step=False, on_epoch=True, prog_bar=True)
-        self.log('val_auroc_epoch', self.val_auroc,
-                on_step=False, on_epoch=True, prog_bar=True)
+        self.log('val_acc_epoch',  self.val_acc,  on_step=False, on_epoch=True, prog_bar=True)
+        self.log('val_auroc_epoch', self.val_auroc, on_step=False, on_epoch=True, prog_bar=True)
 
         return val_loss
 
+
     
-    def test_step(self, batch: tuple, batch_idx: int) -> torch.Tensor:
-        X, Y = batch
-        mask = torch.isnan(Y)
-
-        D, Yh = self.model(X)
-
-        Ph, Pw = Y.shape[-2], Y.shape[-1]
+    def test_step(self, batch:tuple, batch_idx:int) -> torch.Tensor:
+        X, Y   = batch
+        mask  = torch.isnan(Y)
+        
+        D, Yh  = self.model(X)
+        
+        # Align predictions to labels
+        Ph, Pw = Y.shape[-2], Y.shape[-1]    # e.g. 4, 4
         D  = F.adaptive_avg_pool2d(D,  (Ph, Pw)).squeeze(1)
         Yh = F.adaptive_avg_pool2d(Yh, (Ph, Pw)).squeeze(1)
 
         if self.downscale > 1:
-            Y    = F.max_pool2d(torch.nan_to_num(Y, nan=0.0),
-                                kernel_size=self.downscale, stride=self.downscale)
-            mask = F.max_pool2d(mask.int(), kernel_size=self.downscale,
-                                stride=self.downscale).bool()
-            mask = mask & ~Y.bool()
+            Y    = F.max_pool2d(torch.nan_to_num(Y, nan=0.0), kernel_size=self.downscale, stride=self.downscale)
+            mask = F.max_pool2d(mask.int(), kernel_size=self.downscale, stride=self.downscale)
+            mask = mask.bool() & ~Y.bool()
             D    = F.avg_pool2d(D,  kernel_size=self.downscale, stride=self.downscale)
             Yh   = F.avg_pool2d(Yh, kernel_size=self.downscale, stride=self.downscale)
 
         loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask], reduction='mean')
-        loss_C = self.contrast_loss(D[~mask], Y[~mask],
-                                    margin=self.margin_contrast, reduction="mean")
+        loss_C = self.contrast_loss(D[~mask], Y[~mask], margin=self.margin_contrast, reduction="mean")
         test_loss = loss_S + self.weight_contrast * loss_C
+        self.log('test_loss', test_loss, prog_bar=True, on_step=False, on_epoch=True)
 
-        self.log('test_loss', test_loss,
-                on_step=False, on_epoch=True, prog_bar=True,
-                batch_size=(~mask).sum().item())
+        # Metrics
+        probs = torch.sigmoid(Yh)
+        valid = ~mask
+        if valid.any():
+            self.test_acc.update(probs[valid], Y[valid])
+            self.test_auroc.update(probs[valid], Y[valid])
 
-        probs   = torch.sigmoid(Yh)
-        y_true  = Y[~mask]
-        y_pred  = probs[~mask]
-
-        self.test_acc.update(y_pred, y_true)
-        self.test_auroc.update(y_pred, y_true)
-
-        self.log('test_acc_epoch',  self.test_acc,
-                on_step=False, on_epoch=True, prog_bar=True)
-        self.log('test_auroc_epoch', self.test_auroc,
-                on_step=False, on_epoch=True, prog_bar=True)
+        self.log('test_acc_epoch',  self.test_acc,  on_step=False, on_epoch=True, prog_bar=True)
+        self.log('test_auroc_epoch', self.test_auroc, on_step=False, on_epoch=True, prog_bar=True)
 
         return test_loss
+
 
 
     def configure_optimizers(self) -> dict:
