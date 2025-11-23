@@ -68,9 +68,9 @@ parser.add_argument('--checkpoint_to_eval', type=str, default=None, help='Path t
 parser.add_argument('--eval_cities', nargs='+', type=str, default=None, help='Cities on which we want to evaluate the model.')
 
 # hyperparameters
-parser.add_argument('--max_epochs_align', type=int, default=1, help='Max epochs for the alignment (frozen encoder) training stage.')
-parser.add_argument('--max_epochs_ft', type=int, default=100, help='Max epochs for the fine-tuning (unfrozen encoder) stage.')
-parser.add_argument('--patience_ft', type=int, default=2, help='Early stopping patience for the fine-tuning stage.') # Increased default
+parser.add_argument('--max_epochs_align', type=int, default=2, help='Max epochs for the alignment (frozen encoder) training stage.')
+parser.add_argument('--max_epochs_ft', type=int, default=1000, help='Max epochs for the fine-tuning (unfrozen encoder) stage.')
+parser.add_argument('--patience_ft', type=int, default=5, help='Early stopping patience for the fine-tuning stage.') # Increased default
 parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate for the optimizer.')
 parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training and evaluation.')
 parser.add_argument('--weight_contrast', type=float, default=0.25, help='Weight for the contrastive loss component.')
@@ -81,6 +81,12 @@ parser.add_argument('--image_size', type=int, default=224, help='Size of the inp
 parser.add_argument('--patch_size', type=int, default=32, help='Size of the image patches.')
 parser.set_defaults(buffer_around_destruction=True)
 
+parser.add_argument('--encoder_lr', type=float, default=1e-5, help='LR for encoder when unfrozen.')
+parser.add_argument('--encoder_last_n', type=int, default=3, help='How many last ViT blocks to unfreeze for FT.')
+parser.add_argument('--use_llrd', action='store_true', help='Use layer-wise LR decay for encoder groups.')
+parser.add_argument('--llrd_decay', type=float, default=0.65, help='Decay factor per earlier encoder block if LLRD is on.')
+parser.add_argument('--warmup_epochs', type=int, default=2, help='Epochs of warmup at the start of FT stage.')
+parser.add_argument('--grad_clip_val', type=float, default=1.0, help='Gradient clipping (norm).')
 
 # Add any other hyperparameters you want to control via CLI
 args = parser.parse_args()
@@ -804,6 +810,13 @@ class SiameseModel(nn.Module):
             nn.Linear(head_hidden, 1)
         )
 
+        # classification head on concatenated pair features
+        self.mlp_head_simple = nn.Sequential(
+            nn.Linear(d, 128),
+            nn.GELU(),
+            nn.Linear(128, 1),
+        )
+        
     def _encode_tokens(self, x):  # x: [B, 3, 224, 224]
         out = self.encoder(x).last_hidden_state  # [B, 1+196, 768]
         return out[:, 1:, :]  # drop CLS -> [B, 196, 768]
@@ -819,9 +832,11 @@ class SiameseModel(nn.Module):
         D = (H0 - H1).norm(dim=-1)              # [B,196]
 
         # classification head
-        Z  = torch.cat([H0, H1, torch.abs(H0 - H1), H0 * H1], dim=-1)  # [B,196,4d]
-        Yh = self.mlp_head(Z).squeeze(-1)                               # [B,196]
-
+        #Z  = torch.cat([H0, H1, torch.abs(H0 - H1), H0 * H1], dim=-1)  # [B,196,4d]
+        #Yh = self.mlp_head(Z).squeeze(-1)                               # [B,196]
+        diff = torch.abs(H0 - H1)    # [B,196,d]
+        Yh   = self.mlp_head_simple(diff).squeeze(-1)
+        
         # reshape to grids
         B = X.size(0); P = self.patch_dim
         D  = D.view(B, 1, P, P)      # [B,1,14,14]
@@ -862,6 +877,94 @@ class SiameseModule(pl.LightningModule):
         self.train_num_patches = 0
         self.val_num_patches = 0
         self.test_num_patches = 0
+
+    def _encoder_num_layers(self):
+        # HF ViT uses encoder.layer.<idx>
+        # Count layers by probing named_modules
+        layers = [n for n, _ in self.model.encoder.named_modules() if n.startswith('encoder.layer.')]
+        # get last index + 1
+        max_idx = -1
+        for n in layers:
+            try:
+                i = int(n.split('.')[2])
+                max_idx = max(max_idx, i)
+            except:
+                pass
+        return max_idx + 1 if max_idx >= 0 else 0
+
+    def unfreeze_last_blocks(self, last_n: int, train_patch_embed: bool=False):
+        """Freeze everything, then unfreeze only the last N encoder blocks (+ optionally patch_embed)."""
+        # 1) freeze all encoder
+        for p in self.model.encoder.parameters():
+            p.requires_grad = False
+
+        L = self._encoder_num_layers()
+        start = max(0, L - int(last_n))
+        # 2) unfreeze last_n blocks
+        for name, p in self.model.encoder.named_parameters():
+            # match encoder.layer.k
+            if '.layer.' in name:
+                try:
+                    k = int(name.split('.layer.')[1].split('.')[0])
+                except:
+                    k = -1
+                if k >= start:
+                    p.requires_grad = True
+
+        # 3) optionally unfreeze patch_embed
+        if train_patch_embed:
+            for name, p in self.model.encoder.named_parameters():
+                if 'embeddings.patch_embeddings' in name:
+                    p.requires_grad = True
+
+        self.trainer.strategy.setup_optimizers(self.trainer)
+        self.count_parameters()
+        print(f'Encoder: unfroze last {last_n} blocks (out of {L}). Patch-embed trainable = {train_patch_embed}')
+
+    def _collect_head_params(self):
+        head = list(self.model.mlp_head_simple.parameters())
+        proj = list(self.model.proj.parameters())
+        return head + proj
+
+    def _build_param_groups_llrd(self, base_head_lr: float, base_enc_lr: float, llrd_decay: float, last_n_blocks: int, use_llrd: bool):
+        """Return AdamW param groups with separate head and encoder (optionally LLRD over last_n blocks)."""
+        groups = []
+        # 1) head/proj group
+        groups.append({"params": self._collect_head_params(), "lr": base_head_lr, "weight_decay": self.weight_decay})
+
+        # 2) encoder groups
+        L = self._encoder_num_layers()
+        start = max(0, L - int(last_n_blocks))
+        # build per-block groups (only those with requires_grad True)
+        for i in range(start, L):
+            block_params = []
+            for n, p in self.model.encoder.named_parameters():
+                if not p.requires_grad:
+                    continue
+                # take only this block's params
+                if f'encoder.layer.{i}.' in n:
+                    block_params.append(p)
+            if not block_params:
+                continue
+            if use_llrd:
+                depth_from_last = (L - 1) - i   # last block gets depth 0
+                lr_i = base_enc_lr * (llrd_decay ** depth_from_last)
+            else:
+                lr_i = base_enc_lr
+            groups.append({"params": block_params, "lr": lr_i, "weight_decay": self.weight_decay})
+
+        # (optional) patch_embed if unfrozen
+        patch_params = []
+        for n, p in self.model.encoder.named_parameters():
+            if p.requires_grad and 'embeddings.patch_embeddings' in n:
+                patch_params.append(p)
+        if patch_params:
+            # give earliest part the smallest LR
+            lr_patch = base_enc_lr * (llrd_decay ** L) if use_llrd else base_enc_lr * 0.5
+            groups.append({"params": patch_params, "lr": lr_patch, "weight_decay": self.weight_decay})
+
+        return groups
+
 
     def count_parameters(self):
         '''Counts the number of parameters in a model'''
@@ -989,11 +1092,51 @@ class SiameseModule(pl.LightningModule):
 
         return test_loss
 
+    def configure_optimizers(self):
+        # Build param groups: head at self.learning_rate, encoder at args.encoder_lr
+        base_head_lr = self.learning_rate
+        base_enc_lr  = getattr(args, 'encoder_lr', 1e-5)
+        last_n       = getattr(args, 'encoder_last_n', 3)
+        use_llrd     = getattr(args, 'use_llrd', False)
+        llrd_decay   = getattr(args, 'llrd_decay', 0.65)
 
+        param_groups = self._build_param_groups_llrd(
+            base_head_lr=base_head_lr,
+            base_enc_lr=base_enc_lr,
+            llrd_decay=llrd_decay,
+            last_n_blocks=last_n,
+            use_llrd=use_llrd
+        )
 
-    def configure_optimizers(self) -> dict:
-        optimizer = optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
-        return {'optimizer':optimizer}
+        optimizer = optim.AdamW(param_groups, weight_decay=self.weight_decay)
+
+        # Warmup (epochs) then cosine (epochs). Simple, stable, Lightning-friendly.
+        warmup_epochs = max(0, int(getattr(args, 'warmup_epochs', 2)))
+        total_ft_epochs = int(args.max_epochs_ft)
+        cosine_epochs = max(1, total_ft_epochs - warmup_epochs)
+
+        # Warmup scales LR linearly from 0->1 over warmup_epochs (per epoch)
+        def warmup_lambda(epoch_idx: int):
+            if warmup_epochs == 0:
+                return 1.0
+            return float(min(1.0, (epoch_idx + 1) / warmup_epochs))
+
+        warmup = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_lambda)
+        cosine = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cosine_epochs)
+
+        scheduler = optim.lr_scheduler.SequentialLR(
+            optimizer, schedulers=[warmup, cosine], milestones=[warmup_epochs]
+        )
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",
+                "frequency": 1,
+            },
+        }
+
     
     def on_train_epoch_end(self) -> None:
         """Compute and log train metrics safely at the end of the epoch."""
@@ -1074,8 +1217,6 @@ model_module = SiameseModule(
     weight_decay=args.weight_decay,
     weight_contrast=args.weight_contrast, #! Should be tuned
     margin_contrast=args.margin_contrast) 
-
-
     
 #%% MAIN SCRIPT LOGIC DISPATCHER
     # --- MAIN SCRIPT LOGIC ---
@@ -1094,17 +1235,22 @@ if args.mode == 'train':
         max_epochs=args.max_epochs_align,
         accelerator=device,
         logger=False,
-        enable_checkpointing=False
+        enable_checkpointing=False,
+        gradient_clip_val=args.grad_clip_val
     )
 
     alignment_trainer.fit(model=model_module, datamodule=data_module)
     print("--- Alignment Stage Complete ---")
 
     # --- FINE-TUNING STAGE ---
-    print("\n--- Stage 2: Fine-Tuning (Encoder Unfrozen) ---\n")
-    model_module.unfreeze_encoder()
+    print(f"\n--- Stage 2: Fine-Tuning (Unfreeze last {args.encoder_last_n} layers) ---\n")
+    # model_module.unfreeze_encoder()
+    model_module.unfreeze_last_blocks(args.encoder_last_n, train_patch_embed=False)
+
     if 'count_parameters' in globals() and callable(globals()['count_parameters']): count_parameters(model_module)
 
+
+    
     fine_tune_logger = loggers.CSVLogger(
         save_dir=f'{paths.models}/logs',
         name=model_module.model_name,
@@ -1193,7 +1339,8 @@ if args.mode == 'train':
         accelerator=device,
         logger=fine_tune_logger,
         callbacks=trainer_callbacks_list,
-        profiler=profilers.SimpleProfiler() if 'profilers' in globals() and callable(globals()['profilers'].SimpleProfiler) else None
+        profiler=profilers.SimpleProfiler() if 'profilers' in globals() and callable(globals()['profilers'].SimpleProfiler) else None,
+        gradient_clip_val=args.grad_clip_val
     )
     
     initial_ft_ckpt_path = None # For a new run_name, usually start fresh fine-tuning
