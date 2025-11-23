@@ -615,7 +615,7 @@ def main():
         print(f"\n[INFO] Evaluating checkpoint: {ckpt_file}")
 
         # load checkpoint on CPU and pick out state_dict
-        ckpt = torch.load(ckpt_path, map_location="cpu")
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
         state_dict = ckpt.get("state_dict", ckpt)
         epoch = ckpt.get("epoch", None)
         global_step = ckpt.get("global_step", None)
