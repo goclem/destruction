@@ -17,7 +17,7 @@ if [ -z "$RUN_NAME" ]; then
     exit 1
 fi
 
-python3 analyze_run_valid_vs_test.py \
+python3 run_overview_vali_test.py \
   --run_name "$RUN_NAME" \
   --model_name "$MODEL_NAME" \
   --batch_size "$BATCH_SIZE" \
