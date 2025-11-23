@@ -978,10 +978,8 @@ class SiameseModule(pl.LightningModule):
 
 # Initialises datasets
 train_datafiles = dict(zip(args.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_img{args.image_size}_pat{args.patch_size}_buf{args.buffer_around_destruction}_train_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_img{args.image_size}_pat{args.patch_size}_buf{args.buffer_around_destruction}_train_balanced.zarr') for city in args.cities]))
-#valid_datafiles
-test_datafiles = dict(zip(args.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_img{args.image_size}_pat{args.patch_size}_buf{args.buffer_around_destruction}_valid_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_img{args.image_size}_pat{args.patch_size}_buf{args.buffer_around_destruction}_valid_balanced.zarr') for city in args.cities]))
-#test_datafiles 
-valid_datafiles = dict(zip(args.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_img{args.image_size}_pat{args.patch_size}_buf{args.buffer_around_destruction}_test_balanced.zarr',  labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_img{args.image_size}_pat{args.patch_size}_buf{args.buffer_around_destruction}_test_balanced.zarr')  for city in args.cities]))
+valid_datafiles = dict(zip(args.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_img{args.image_size}_pat{args.patch_size}_buf{args.buffer_around_destruction}_valid_balanced.zarr', labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_img{args.image_size}_pat{args.patch_size}_buf{args.buffer_around_destruction}_valid_balanced.zarr') for city in args.cities]))
+test_datafiles = dict(zip(args.cities, [dict(images_zarr=f'{paths.data}/{city}/zarr/images_prepost_img{args.image_size}_pat{args.patch_size}_buf{args.buffer_around_destruction}_test_balanced.zarr',  labels_zarr=f'{paths.data}/{city}/zarr/labels_prepost_img{args.image_size}_pat{args.patch_size}_buf{args.buffer_around_destruction}_test_balanced.zarr')  for city in args.cities]))
 processor   = transformers.ViTImageProcessor.from_pretrained('facebook/vit-mae-base')
 formatter   = Formatter(processor=processor, label_map=args.label_map, image_size=processor.size['height'])
 data_module = ZarrDataModule(train_datafiles=train_datafiles, 
