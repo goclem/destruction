@@ -7,13 +7,13 @@
 # Version: 1.0
 
 #python3 destruction_finetune_siamese.py --cities damascus
-
-#exit 0 
+python3 destruction_finetune_siamese.py --cities hostomel irpin livoberezhnyi moschun rubizhne volnovakha aleppo damascus daraa deirezzor hama homs idlib raqqa
+exit 0 
 
 # --- Define Hyperparameter Grids ---
 learning_rates=(1e-4 2e-4)
 weights_contrast=(0.05 0.1 0.25)
-weights_decay=(0.01 0.05 0.1)
+weights_decay=(0.05 0.1)
 
 # --- Define Fixed Parameters ---
 CITIES="hostomel irpin livoberezhnyi moschun rubizhne volnovakha aleppo damascus daraa deirezzor hama homs idlib raqqa"
