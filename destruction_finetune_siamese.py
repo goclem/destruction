@@ -858,6 +858,10 @@ class SiameseModule(pl.LightningModule):
         self.test_acc = classification.BinaryAccuracy()
         self.test_auroc = classification.BinaryAUROC()
 
+        # NEW: counters to know if metrics actually received any updates
+        self.train_num_patches = 0
+        self.val_num_patches = 0
+        self.test_num_patches = 0
 
     def count_parameters(self):
         '''Counts the number of parameters in a model'''
@@ -905,16 +909,13 @@ class SiameseModule(pl.LightningModule):
         train_loss = loss_S + self.weight_contrast * loss_C
         self.log('train_loss', train_loss, prog_bar=True, on_step=False, on_epoch=True)
 
-        # Metrics
+        # Metrics (we only update the metric state here; logging happens in on_train_epoch_end)
         probs = torch.sigmoid(Yh)
         valid = ~mask
         if valid.any():
             self.train_acc.update(probs[valid], Y[valid])
             self.train_auroc.update(probs[valid], Y[valid])
-
-        # log metric objects; lightning will call compute() at epoch end
-        self.log('train_acc_epoch',  self.train_acc,  on_step=False, on_epoch=True, prog_bar=True)
-        self.log('train_auroc_epoch', self.train_auroc, on_step=False, on_epoch=True, prog_bar=True)
+            self.train_num_patches += valid.sum().item()
 
         return train_loss
 
@@ -943,15 +944,13 @@ class SiameseModule(pl.LightningModule):
 
         self.log('val_loss', val_loss, on_step=False, on_epoch=True, prog_bar=True)
 
-        # Metrics
+        # Metrics (we only update the metric state here; logging happens in on_validation_epoch_end)
         probs = torch.sigmoid(Yh)
         valid = ~mask
         if valid.any():
             self.val_acc.update(probs[valid], Y[valid])
             self.val_auroc.update(probs[valid], Y[valid])
-
-        self.log('val_acc_epoch',  self.val_acc,  on_step=False, on_epoch=True, prog_bar=True)
-        self.log('val_auroc_epoch', self.val_auroc, on_step=False, on_epoch=True, prog_bar=True)
+            self.val_num_patches += valid.sum().item()
 
         return val_loss
 
@@ -980,15 +979,13 @@ class SiameseModule(pl.LightningModule):
         test_loss = loss_S + self.weight_contrast * loss_C
         self.log('test_loss', test_loss, prog_bar=True, on_step=False, on_epoch=True)
 
-        # Metrics
+        # Metrics (we only update the metric state here; logging happens in on_test_epoch_end)
         probs = torch.sigmoid(Yh)
         valid = ~mask
         if valid.any():
             self.test_acc.update(probs[valid], Y[valid])
             self.test_auroc.update(probs[valid], Y[valid])
-
-        self.log('test_acc_epoch',  self.test_acc,  on_step=False, on_epoch=True, prog_bar=True)
-        self.log('test_auroc_epoch', self.test_auroc, on_step=False, on_epoch=True, prog_bar=True)
+            self.test_num_patches += valid.sum().item()
 
         return test_loss
 
@@ -999,16 +996,53 @@ class SiameseModule(pl.LightningModule):
         return {'optimizer':optimizer}
     
     def on_train_epoch_end(self) -> None:
+        """Compute and log train metrics safely at the end of the epoch."""
+        if self.train_num_patches > 0:
+            train_acc = self.train_acc.compute()
+            train_auroc = self.train_auroc.compute()
+        else:
+            # No valid patches seen this epoch; log NaNs to avoid torchmetrics errors
+            train_acc = torch.tensor(float('nan'), device=self.device)
+            train_auroc = torch.tensor(float('nan'), device=self.device)
+
+        self.log('train_acc_epoch', train_acc, prog_bar=True, on_step=False, on_epoch=True)
+        self.log('train_auroc_epoch', train_auroc, prog_bar=True, on_step=False, on_epoch=True)
+
         self.train_acc.reset()
         self.train_auroc.reset()
-    
+        self.train_num_patches = 0
+
     def on_validation_epoch_end(self) -> None:
+        """Compute and log validation metrics safely at the end of the epoch."""
+        if self.val_num_patches > 0:
+            val_acc = self.val_acc.compute()
+            val_auroc = self.val_auroc.compute()
+        else:
+            val_acc = torch.tensor(float('nan'), device=self.device)
+            val_auroc = torch.tensor(float('nan'), device=self.device)
+
+        self.log('val_acc_epoch', val_acc, prog_bar=True, on_step=False, on_epoch=True)
+        self.log('val_auroc_epoch', val_auroc, prog_bar=True, on_step=False, on_epoch=True)
+
         self.val_acc.reset()
         self.val_auroc.reset()
-    
+        self.val_num_patches = 0
+
     def on_test_epoch_end(self) -> None:
+        """Compute and log test metrics safely at the end of the epoch."""
+        if self.test_num_patches > 0:
+            test_acc = self.test_acc.compute()
+            test_auroc = self.test_auroc.compute()
+        else:
+            test_acc = torch.tensor(float('nan'), device=self.device)
+            test_auroc = torch.tensor(float('nan'), device=self.device)
+
+        self.log('test_acc_epoch', test_acc, prog_bar=True, on_step=False, on_epoch=True)
+        self.log('test_auroc_epoch', test_auroc, prog_bar=True, on_step=False, on_epoch=True)
+
         self.test_acc.reset()
         self.test_auroc.reset()
+        self.test_num_patches = 0
 
 
 #%% INITIALISE DATA AND MODEL (Needed for both modes) ---
