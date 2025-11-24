@@ -338,21 +338,31 @@ class Formatter:
         # - If training: convert each view to float [0,1], aug, back to uint8 [0,255].
         # - Else: keep as uint8 as loaded from zarr (no cast to float), so the processor sees uint8.
         if getattr(self, "training", False):
-            # ensure tensor dtype (if zarr gave uint8 already, that's fine)
             if not torch.is_tensor(X):
                 X = torch.as_tensor(X)
 
             B = X.shape[0]
-            # apply independent aug to pre & post
             for b in range(B):
                 # to float [0,1]
                 x0 = X[b, 0].to(torch.float32) / 255.0
                 x1 = X[b, 1].to(torch.float32) / 255.0
 
-                # light geometry + mild color (each view independently)
-                x0 = self.tx_geom(x0)
+                # --- sample one random geometry transform and apply to both ---
+                # random horizontal flip
+                if torch.rand(1) < 0.5:
+                    x0 = torchvision.transforms.functional.hflip(x0)
+                    x1 = torchvision.transforms.functional.hflip(x1)
+                # random vertical flip
+                if torch.rand(1) < 0.5:
+                    x0 = torchvision.transforms.functional.vflip(x0)
+                    x1 = torchvision.transforms.functional.vflip(x1)
+                # small shared rotation
+                angle = (torch.rand(1) - 0.5) * 10.0  # uniform in [-5, 5]
+                x0 = torchvision.transforms.functional.rotate(x0, angle.item())
+                x1 = torchvision.transforms.functional.rotate(x1, angle.item())
+
+                # --- color jitter: independent per view ---
                 x0 = self.tx_color(x0)
-                x1 = self.tx_geom(x1)
                 x1 = self.tx_color(x1)
 
                 # back to uint8 [0,255]
