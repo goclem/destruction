@@ -311,7 +311,7 @@ class Formatter:
             T.RandomHorizontalFlip(p=1.0),
             T.RandomVerticalFlip(p=1.0),
             T.RandomRotation(degrees=5),
-            T.Identity()
+            lambda x: x, # identity
         ])
         self.tx_color = T.ColorJitter(brightness=0.05, contrast=0.05)
 
