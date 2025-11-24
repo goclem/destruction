@@ -9,7 +9,7 @@ error                   = condor_logs/errors.$(Cluster).$(Process).err
 getenv = True
 
 request_gpus = 1
-+UseNvidiaA100 = True
+#+UseNvidiaA100 = True
 # TestJob CPU
 # +testJob = True
 queue

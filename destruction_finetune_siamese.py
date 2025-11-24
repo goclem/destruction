@@ -22,6 +22,7 @@ import zarr
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.data as utils
+import torchvision.transforms as T
 
 import datetime
 import csv
@@ -299,7 +300,56 @@ class ZarrDataset(utils.data.Dataset):
         x = torch.from_numpy(self.images[idx])
         y = torch.from_numpy(self.labels[idx])
         return x, y
+    
+class Formatter:
+    def __init__(self, processor, label_map:dict, image_size:int=224) -> None:
+        self.processor  = processor
+        self.label_map  = label_map
+        self.image_size = image_size
+        # light & safe: flips/rotations; very mild brightness/contrast
+        self.tx_geom = T.RandomChoice([
+            T.RandomHorizontalFlip(p=1.0),
+            T.RandomVerticalFlip(p=1.0),
+            T.RandomRotation(degrees=5),
+            T.Identity()
+        ])
+        self.tx_color = T.ColorJitter(brightness=0.05, contrast=0.05)
 
+    def _aug_one(self, img: torch.Tensor) -> torch.Tensor:
+        # torchvision v2 ops accept tensors CHW in [0,1] or [0,255]; we’re still in raw range here.
+        # Normalize to [0,1] temporarily for color jitter, then scale back.
+        x = img.float() / 255.0
+        x = self.tx_geom(x)
+        x = self.tx_color(x)
+        x = (x * 255.0).clamp(0, 255)
+        return x
+
+    def __call__(self, X:torch.Tensor, Y:torch.Tensor):
+        # X: [B,2,3,H,W] in uint8 from zarr -> apply independent aug to each view
+        # apply aug BEFORE ViT processor
+        # note: do this only in train loop; Lightning sets self.training on modules, so pass a flag or check globally.
+        if torch.is_tensor(X) and X.dtype != torch.float32:
+            X = X.float()
+
+        if self.training:  # you can set this flag from the LightningModule by formatter.training = self.training
+            # vectorized-ish loop; keeps it simple and safe
+            B = X.shape[0]
+            for b in range(B):
+                X[b,0] = self._aug_one(X[b,0])
+                X[b,1] = self._aug_one(X[b,1])
+
+        # now go through ViT processor
+        X = X.view(-1, 3, self.image_size, self.image_size)
+        X = self.processor(X, return_tensors='pt')['pixel_values']
+        X = X.view(-1, 2, 3, self.image_size, self.image_size)
+
+        Y = Y.squeeze(1).float()
+        for k, v in self.label_map.items():
+            Y = torch.where(Y == k, v, Y)
+        return X, Y    
+    
+    
+'''
 class Formatter:
     
     def __init__(self, processor, label_map:dict, image_size:int=224) -> None:
@@ -318,7 +368,7 @@ class Formatter:
         for k, v in self.label_map.items():
             Y = torch.where(Y == k, v, Y)
         return X, Y
-'''
+
 class ZarrDataLoader:
 
     def __init__(self, datafiles:list, datasets:list, formatter, batch_size:int, shuffle:bool=True):
@@ -1138,7 +1188,19 @@ class SiameseModule(pl.LightningModule):
             },
         }
 
-    
+    def on_train_start(self):
+        if hasattr(self.trainer.datamodule.formatter, "training"):
+            self.trainer.datamodule.formatter.training = True
+
+    def on_validation_start(self):
+        if hasattr(self.trainer.datamodule.formatter, "training"):
+            self.trainer.datamodule.formatter.training = False
+
+    def on_test_start(self):
+        if hasattr(self.trainer.datamodule.formatter, "training"):
+            self.trainer.datamodule.formatter.training = False
+
+
     def on_train_epoch_end(self) -> None:
         """Compute and log train metrics safely at the end of the epoch."""
         if self.train_num_patches > 0:
