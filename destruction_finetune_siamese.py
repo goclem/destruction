@@ -74,7 +74,7 @@ parser.add_argument('--max_epochs_ft', type=int, default=1000, help='Max epochs 
 parser.add_argument('--patience_ft', type=int, default=5, help='Early stopping patience for the fine-tuning stage.') # Increased default
 parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate for the optimizer.')
 parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training and evaluation.')
-parser.add_argument('--weight_contrast', type=float, default=0.25, help='Weight for the contrastive loss component.')
+parser.add_argument('--weight_contrast', type=float, default=0.0, help='Weight for the contrastive loss component.')
 parser.add_argument('--weight_decay', type=float, default=0.05, help='Penalizes large weights to prevent overfitting.')
 parser.add_argument('--margin_contrast', type=float, default=1, help='Value that explains how strict the contrastive loss is.')
 parser.add_argument('--backbone_model', type=str, default='checkpoint-9920', help='Name of the checkpoint of the pretrained encoder.')
