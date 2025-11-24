@@ -81,11 +81,11 @@ parser.add_argument('--image_size', type=int, default=224, help='Size of the inp
 parser.add_argument('--patch_size', type=int, default=32, help='Size of the image patches.')
 parser.set_defaults(buffer_around_destruction=True)
 
-parser.add_argument('--encoder_lr', type=float, default=1e-5, help='LR for encoder when unfrozen.')
-parser.add_argument('--encoder_last_n', type=int, default=3, help='How many last ViT blocks to unfreeze for FT.')
+parser.add_argument('--encoder_lr', type=float, default=5e-6, help='LR for encoder when unfrozen.')
+parser.add_argument('--encoder_last_n', type=int, default=1, help='How many last ViT blocks to unfreeze for FT.')
 parser.add_argument('--use_llrd', action='store_true', help='Use layer-wise LR decay for encoder groups.')
 parser.add_argument('--llrd_decay', type=float, default=0.65, help='Decay factor per earlier encoder block if LLRD is on.')
-parser.add_argument('--warmup_epochs', type=int, default=2, help='Epochs of warmup at the start of FT stage.')
+parser.add_argument('--warmup_epochs', type=int, default=4, help='Epochs of warmup at the start of FT stage.')
 parser.add_argument('--grad_clip_val', type=float, default=1.0, help='Gradient clipping (norm).')
 
 # Add any other hyperparameters you want to control via CLI
@@ -814,6 +814,7 @@ class SiameseModel(nn.Module):
         self.mlp_head_simple = nn.Sequential(
             nn.Linear(d, 128),
             nn.GELU(),
+            nn.Dropout(0.2),     # <-- add this
             nn.Linear(128, 1),
         )
         
