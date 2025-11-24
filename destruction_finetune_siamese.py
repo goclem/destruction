@@ -306,6 +306,7 @@ class Formatter:
         self.processor  = processor
         self.label_map  = label_map
         self.image_size = image_size
+        self.training = False
         # light & safe: flips/rotations; very mild brightness/contrast
         self.tx_geom = T.RandomChoice([
             T.RandomHorizontalFlip(p=1.0),
@@ -331,7 +332,7 @@ class Formatter:
         if torch.is_tensor(X) and X.dtype != torch.float32:
             X = X.float()
 
-        if self.training:  # you can set this flag from the LightningModule by formatter.training = self.training
+        if getattr(self, "training", False): # you can set this flag from the LightningModule by formatter.training = self.training
             # vectorized-ish loop; keeps it simple and safe
             B = X.shape[0]
             for b in range(B):
@@ -1189,16 +1190,17 @@ class SiameseModule(pl.LightningModule):
         }
 
     def on_train_start(self):
-        if hasattr(self.trainer.datamodule.formatter, "training"):
+        if hasattr(self.trainer.datamodule, "formatter"):
             self.trainer.datamodule.formatter.training = True
 
     def on_validation_start(self):
-        if hasattr(self.trainer.datamodule.formatter, "training"):
+        if hasattr(self.trainer.datamodule, "formatter"):
             self.trainer.datamodule.formatter.training = False
 
     def on_test_start(self):
-        if hasattr(self.trainer.datamodule.formatter, "training"):
+        if hasattr(self.trainer.datamodule, "formatter"):
             self.trainer.datamodule.formatter.training = False
+
 
 
     def on_train_epoch_end(self) -> None:
