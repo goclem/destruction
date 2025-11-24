@@ -325,29 +325,54 @@ class Formatter:
         x = (x * 255.0).clamp(0, 255)
         return x
 
-    def __call__(self, X:torch.Tensor, Y:torch.Tensor):
-        # X: [B,2,3,H,W] in uint8 from zarr -> apply independent aug to each view
-        # apply aug BEFORE ViT processor
-        # note: do this only in train loop; Lightning sets self.training on modules, so pass a flag or check globally.
-        if torch.is_tensor(X) and X.dtype != torch.float32:
-            X = X.float()
+    def __call__(self, X: torch.Tensor, Y: torch.Tensor):
+        # X: [B, 2, 3, H, W]; Y: [B, 1, Ph, Pw]
 
-        if getattr(self, "training", False): # you can set this flag from the LightningModule by formatter.training = self.training
-            # vectorized-ish loop; keeps it simple and safe
-            B = X.shape[0]
-            for b in range(B):
-                X[b,0] = self._aug_one(X[b,0])
-                X[b,1] = self._aug_one(X[b,1])
-
-        # now go through ViT processor
-        X = X.view(-1, 3, self.image_size, self.image_size)
-        X = self.processor(X, return_tensors='pt')['pixel_values']
-        X = X.view(-1, 2, 3, self.image_size, self.image_size)
-
+        # ---------- LABELS ----------
         Y = Y.squeeze(1).float()
         for k, v in self.label_map.items():
             Y = torch.where(Y == k, v, Y)
-        return X, Y    
+
+        # ---------- IMAGES ----------
+        # IMPORTANT:
+        # - If training: convert each view to float [0,1], aug, back to uint8 [0,255].
+        # - Else: keep as uint8 as loaded from zarr (no cast to float), so the processor sees uint8.
+        if getattr(self, "training", False):
+            # ensure tensor dtype (if zarr gave uint8 already, that's fine)
+            if not torch.is_tensor(X):
+                X = torch.as_tensor(X)
+
+            B = X.shape[0]
+            # apply independent aug to pre & post
+            for b in range(B):
+                # to float [0,1]
+                x0 = X[b, 0].to(torch.float32) / 255.0
+                x1 = X[b, 1].to(torch.float32) / 255.0
+
+                # light geometry + mild color (each view independently)
+                x0 = self.tx_geom(x0)
+                x0 = self.tx_color(x0)
+                x1 = self.tx_geom(x1)
+                x1 = self.tx_color(x1)
+
+                # back to uint8 [0,255]
+                X[b, 0] = (x0.clamp(0, 1) * 255.0).round().to(torch.uint8)
+                X[b, 1] = (x1.clamp(0, 1) * 255.0).round().to(torch.uint8)
+        else:
+            # validation / test: ensure uint8, do NOT cast to float here
+            if not torch.is_tensor(X):
+                X = torch.as_tensor(X)
+            if X.dtype != torch.uint8:
+                # if earlier code converted to float, bring it back safely
+                X = X.clamp(0, 255).round().to(torch.uint8)
+
+        # Flatten pair dimension and send to ViT processor
+        B, V, C, H, W = X.shape  # V=2
+        X = X.view(B * V, C, H, W)                      # [B*2, 3, H, W], dtype uint8
+        X = self.processor(X, return_tensors='pt')['pixel_values']  # float normalized
+        X = X.view(B, V, C, self.image_size, self.image_size)       # [B,2,3,224,224]
+        return X, Y
+
     
     
 '''
