@@ -1094,7 +1094,7 @@ class SiameseModule(pl.LightningModule):
             D    = F.avg_pool2d(D,  kernel_size=self.downscale, stride=self.downscale)
             Yh   = F.avg_pool2d(Yh, kernel_size=self.downscale, stride=self.downscale)
 
-        loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask]), reduction='mean')
+        loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask], reduction='mean')
         loss_C = self.contrast_loss(D[~mask], Y[~mask], margin=self.margin_contrast, reduction="mean")
         train_loss = loss_S + self.weight_contrast * loss_C
         self.log('train_loss', train_loss, prog_bar=True, on_step=False, on_epoch=True)
@@ -1128,7 +1128,7 @@ class SiameseModule(pl.LightningModule):
             D    = F.avg_pool2d(D,  kernel_size=self.downscale, stride=self.downscale)
             Yh   = F.avg_pool2d(Yh, kernel_size=self.downscale, stride=self.downscale)
 
-        loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask]), reduction='mean')
+        loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask], reduction='mean')
         loss_C = self.contrast_loss(D[~mask], Y[~mask], margin=self.margin_contrast, reduction="mean")
         val_loss = loss_S + self.weight_contrast * loss_C
 
@@ -1164,7 +1164,7 @@ class SiameseModule(pl.LightningModule):
             D    = F.avg_pool2d(D,  kernel_size=self.downscale, stride=self.downscale)
             Yh   = F.avg_pool2d(Yh, kernel_size=self.downscale, stride=self.downscale)
 
-        loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask]), reduction='mean')
+        loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask], reduction='mean')
         loss_C = self.contrast_loss(D[~mask], Y[~mask], margin=self.margin_contrast, reduction="mean")
         test_loss = loss_S + self.weight_contrast * loss_C
         self.log('test_loss', test_loss, prog_bar=True, on_step=False, on_epoch=True)
