@@ -71,7 +71,7 @@ parser.add_argument('--eval_cities', nargs='+', type=str, default=None, help='Ci
 # hyperparameters
 parser.add_argument('--max_epochs_align', type=int, default=2, help='Max epochs for the alignment (frozen encoder) training stage.')
 parser.add_argument('--max_epochs_ft', type=int, default=1000, help='Max epochs for the fine-tuning (unfrozen encoder) stage.')
-parser.add_argument('--patience_ft', type=int, default=5, help='Early stopping patience for the fine-tuning stage.') # Increased default
+parser.add_argument('--patience_ft', type=int, default=2, help='Early stopping patience for the fine-tuning stage.') # Increased default
 parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate for the optimizer.')
 parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training and evaluation.')
 parser.add_argument('--weight_contrast', type=float, default=0.0, help='Weight for the contrastive loss component.')
@@ -941,7 +941,7 @@ class SiameseModule(pl.LightningModule):
         self.downscale = downscale
         self.model_name      = model_name
         self.contrast_loss   = contrastive_loss
-        self.sigmoid_loss    = torchvision.ops.sigmoid_focal_loss # nn.crossentropy
+        self.sigmoid_loss    = nn.BCEWithLogitsLoss() #torchvision.ops.sigmoid_focal_loss # nn.crossentropy
         self.learning_rate   = learning_rate
         self.weight_decay    = weight_decay
         self.weight_contrast  = weight_contrast
@@ -1094,7 +1094,7 @@ class SiameseModule(pl.LightningModule):
             D    = F.avg_pool2d(D,  kernel_size=self.downscale, stride=self.downscale)
             Yh   = F.avg_pool2d(Yh, kernel_size=self.downscale, stride=self.downscale)
 
-        loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask], reduction='mean')
+        loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask])#, reduction='mean')
         loss_C = self.contrast_loss(D[~mask], Y[~mask], margin=self.margin_contrast, reduction="mean")
         train_loss = loss_S + self.weight_contrast * loss_C
         self.log('train_loss', train_loss, prog_bar=True, on_step=False, on_epoch=True)
@@ -1128,7 +1128,7 @@ class SiameseModule(pl.LightningModule):
             D    = F.avg_pool2d(D,  kernel_size=self.downscale, stride=self.downscale)
             Yh   = F.avg_pool2d(Yh, kernel_size=self.downscale, stride=self.downscale)
 
-        loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask], reduction='mean')
+        loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask])#, reduction='mean')
         loss_C = self.contrast_loss(D[~mask], Y[~mask], margin=self.margin_contrast, reduction="mean")
         val_loss = loss_S + self.weight_contrast * loss_C
 
@@ -1164,7 +1164,7 @@ class SiameseModule(pl.LightningModule):
             D    = F.avg_pool2d(D,  kernel_size=self.downscale, stride=self.downscale)
             Yh   = F.avg_pool2d(Yh, kernel_size=self.downscale, stride=self.downscale)
 
-        loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask], reduction='mean')
+        loss_S = self.sigmoid_loss(Yh[~mask], Y[~mask])#, reduction='mean')
         loss_C = self.contrast_loss(D[~mask], Y[~mask], margin=self.margin_contrast, reduction="mean")
         test_loss = loss_S + self.weight_contrast * loss_C
         self.log('test_loss', test_loss, prog_bar=True, on_step=False, on_epoch=True)
