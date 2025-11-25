@@ -83,7 +83,7 @@ parser.add_argument('--patch_size', type=int, default=32, help='Size of the imag
 parser.set_defaults(buffer_around_destruction=True)
 
 parser.add_argument('--encoder_lr', type=float, default=5e-6, help='LR for encoder when unfrozen.')
-parser.add_argument('--encoder_last_n', type=int, default=1, help='How many last ViT blocks to unfreeze for FT.')
+parser.add_argument('--encoder_last_n', type=int, default=0, help='How many last ViT blocks to unfreeze for FT.')
 parser.add_argument('--use_llrd', action='store_true', help='Use layer-wise LR decay for encoder groups.')
 parser.add_argument('--llrd_decay', type=float, default=0.65, help='Decay factor per earlier encoder block if LLRD is on.')
 parser.add_argument('--warmup_epochs', type=int, default=4, help='Epochs of warmup at the start of FT stage.')
