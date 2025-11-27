@@ -29,7 +29,7 @@ args,unknown = parser.parse_known_args()
 params = argparse.Namespace(
     city=args.city, # aleppo
     buffer_around_destruction=True,
-    buffer_around_destruction_DISTANCE=1, # in patches
+    buffer_around_destruction_DISTANCE=2, # in patches
     reset_zarr=False,
     image_size=224,
     patch_size=32, 
@@ -63,7 +63,7 @@ random.seed(0)
 index = np.random.choice(np.arange(len(params.sample_sizes)) + 1, np.sum(analysis), p=list(params.sample_sizes.values()))
 samples = analysis.astype(int)
 np.place(samples, analysis, index)
-write_raster(samples, profile, f'{paths.data}/{params.city}/others/{params.city}_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_samples.tif')
+write_raster(samples, profile, f'{paths.data}/{params.city}/others/{params.city}_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_samples.tif')
 del profile, index, samples, analysis
 
 #%% COMPUTES LABELS
@@ -151,7 +151,7 @@ for date in dates:
         out[nbr & ~pos] = 255
         subset = out[..., None]
 
-    write_raster(array=subset, profile=profile, destination=f'{paths.data}/{params.city}/labels/label_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{date}.tif')
+    write_raster(array=subset, profile=profile, destination=f'{paths.data}/{params.city}/labels/label_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{date}.tif')
 
 #del damage, geoms, filling, defined, date, subset
 
@@ -166,8 +166,8 @@ if params.reset_zarr:
 
 # Files and samples
 images  = search_data(pattern(city=params.city, type='image'))
-labels  = search_data(pattern(city=params.city, type=f'label_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}'))
-samples = search_data(f'{params.city}_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_samples.tif$')
+labels  = search_data(pattern(city=params.city, type=f'label_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}'))
+samples = search_data(f'{params.city}_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_samples.tif$')
 samples = load_sequences(samples, tile_size=1).squeeze()
 _, window = tiled_profile(source=images[0], tile_size=params.patch_size, crop_size=params.image_size, return_window=True)
 
@@ -185,8 +185,8 @@ for t, (image, label) in enumerate(zip(images, labels)):
     src_labels = image_to_tiles(src_labels, tile_size=params.image_size//params.patch_size).numpy()
     # Writes data for each sample
     for sample, value in dict(train=1, valid=2, test=3).items():
-        dst_images = f'{paths.data}/{params.city}/zarr/images_sequence_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}.zarr'
-        dst_labels = f'{paths.data}/{params.city}/zarr/labels_sequence_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}.zarr'
+        dst_images = f'{paths.data}/{params.city}/zarr/images_sequence_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}.zarr'
+        dst_labels = f'{paths.data}/{params.city}/zarr/labels_sequence_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}.zarr'
         subset     = samples == value
         dst_images = zarr.open(dst_images, mode='a', shape=(subset.sum(), len(images), *src_images.shape[1:]), dtype='u1')
         dst_labels = zarr.open(dst_labels, mode='a', shape=(subset.sum(), len(images), *src_labels.shape[1:]), dtype='u1')
@@ -201,10 +201,10 @@ print('Reshaping the sequences dataset into the pre-post dataset')
 for sample in ['train', 'valid', 'test']:
     print(f' - Processing {sample} sample')
     # Defines datasets paths
-    src_images = f'{paths.data}/{params.city}/zarr/images_sequence_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}.zarr'
-    src_labels = f'{paths.data}/{params.city}/zarr/labels_sequence_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}.zarr'
-    dst_images = f'{paths.data}/{params.city}/zarr/images_prepost_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}.zarr'
-    dst_labels = f'{paths.data}/{params.city}/zarr/labels_prepost_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}.zarr'
+    src_images = f'{paths.data}/{params.city}/zarr/images_sequence_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}.zarr'
+    src_labels = f'{paths.data}/{params.city}/zarr/labels_sequence_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}.zarr'
+    dst_images = f'{paths.data}/{params.city}/zarr/images_prepost_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}.zarr'
+    dst_labels = f'{paths.data}/{params.city}/zarr/labels_prepost_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}.zarr'
     # Reads source datasets
     src_images = zarr.open(src_images, mode='r')
     src_labels = zarr.open(src_labels, mode='r')
@@ -232,10 +232,10 @@ print('Reshaping the sequences dataset into the tiles dataset')
 for sample in ['train', 'valid', 'test']:
     print(f' - Processing {sample} sample')
     # Defines datasets paths
-    src_images = f'{paths.data}/{params.city}/zarr/images_sequence_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}.zarr'
-    src_labels = f'{paths.data}/{params.city}/zarr/labels_sequence_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}.zarr'
-    dst_images = f'{paths.data}/{params.city}/zarr/images_tile_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}.zarr'
-    dst_labels = f'{paths.data}/{params.city}/zarr/labels_tile_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}.zarr'
+    src_images = f'{paths.data}/{params.city}/zarr/images_sequence_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}.zarr'
+    src_labels = f'{paths.data}/{params.city}/zarr/labels_sequence_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}.zarr'
+    dst_images = f'{paths.data}/{params.city}/zarr/images_tile_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}.zarr'
+    dst_labels = f'{paths.data}/{params.city}/zarr/labels_tile_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}.zarr'
     # Reads source datasets
     src_images = zarr.open(src_images, mode='r')
     src_labels = zarr.open(src_labels, mode='r')
@@ -256,10 +256,10 @@ print('Downsampling no-destruction sequences')
 for sample in ['train', 'valid', 'test']:
     print(f' - Processing sample {sample}')
     # Defines datasets paths
-    src_images = f'{paths.data}/{params.city}/zarr/images_sequence_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}.zarr'
-    src_labels = f'{paths.data}/{params.city}/zarr/labels_sequence_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}.zarr'
-    dst_images = f'{paths.data}/{params.city}/zarr/images_sequence_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}_balanced.zarr'
-    dst_labels = f'{paths.data}/{params.city}/zarr/labels_sequence_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}_balanced.zarr'
+    src_images = f'{paths.data}/{params.city}/zarr/images_sequence_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}.zarr'
+    src_labels = f'{paths.data}/{params.city}/zarr/labels_sequence_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}.zarr'
+    dst_images = f'{paths.data}/{params.city}/zarr/images_sequence_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}_balanced.zarr'
+    dst_labels = f'{paths.data}/{params.city}/zarr/labels_sequence_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}_balanced.zarr'
     # Reads source datasets
     src_images = zarr.open(src_images, mode='r')
     total_samples = src_images.shape[0]
@@ -339,10 +339,10 @@ print('Downsampling no-destruction pre-post pairs')
 for sample in ['train', 'valid', 'test']:
     print(f' - Processing {sample} sample')
     # Defines datasets paths
-    src_images = f'{paths.data}/{params.city}/zarr/images_prepost_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}.zarr'
-    src_labels = f'{paths.data}/{params.city}/zarr/labels_prepost_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}.zarr'
-    dst_images = f'{paths.data}/{params.city}/zarr/images_prepost_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}_balanced.zarr'
-    dst_labels = f'{paths.data}/{params.city}/zarr/labels_prepost_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}_balanced.zarr'
+    src_images = f'{paths.data}/{params.city}/zarr/images_prepost_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}.zarr'
+    src_labels = f'{paths.data}/{params.city}/zarr/labels_prepost_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}.zarr'
+    dst_images = f'{paths.data}/{params.city}/zarr/images_prepost_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}_balanced.zarr'
+    dst_labels = f'{paths.data}/{params.city}/zarr/labels_prepost_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}_balanced.zarr'
     # Reads source datasets
     src_images = zarr.open(src_images, mode='r')
     total_samples = src_images.shape[0]
@@ -422,10 +422,10 @@ print('Downsampling no-destruction tiles')
 for sample in ['train', 'valid', 'test']:
     print(f' - Processing {sample} sample')
     # Defines datasets paths
-    src_images = f'{paths.data}/{params.city}/zarr/images_tile_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}.zarr'
-    src_labels = f'{paths.data}/{params.city}/zarr/labels_tile_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}.zarr'
-    dst_images = f'{paths.data}/{params.city}/zarr/images_tile_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}_balanced.zarr'
-    dst_labels = f'{paths.data}/{params.city}/zarr/labels_tile_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}_{sample}_balanced.zarr'
+    src_images = f'{paths.data}/{params.city}/zarr/images_tile_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}.zarr'
+    src_labels = f'{paths.data}/{params.city}/zarr/labels_tile_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}.zarr'
+    dst_images = f'{paths.data}/{params.city}/zarr/images_tile_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}_balanced.zarr'
+    dst_labels = f'{paths.data}/{params.city}/zarr/labels_tile_img{params.image_size}_pat{params.patch_size}_buf{params.buffer_around_destruction}{params.buffer_around_destruction_DISTANCE}_{sample}_balanced.zarr'
     # Reads source datasets
     src_images = zarr.open(src_images, mode='r')
     total_samples = src_images.shape[0]
