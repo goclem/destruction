@@ -521,6 +521,11 @@ def main():
         default=None,
         help="Device to use: 'cuda', 'mps', or 'cpu'. Default: auto-detect.",
     )
+    parser.add_argument('--cities', 
+                        nargs='+', 
+                        type=str, 
+                        default=None, 
+                        help='List of city names for training and default for evaluation.')
 
     args = parser.parse_args()
 
@@ -532,7 +537,11 @@ def main():
 
     hparams = load_hparams(run_dir)
 
-    cities = hparams.get("cities", [])
+    if args.cities is not None:
+        cities = args.cities
+    else:
+        cities = hparams.get("cities", [])
+    
     if isinstance(cities, str):
         # if somehow stored as a single string
         cities = [cities]
