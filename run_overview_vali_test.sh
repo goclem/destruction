@@ -6,7 +6,7 @@
 # Example:
 #   ./run_valid_vs_test.sh grid_search_20251122-065809_lr1e-4_wc0.05_wd0.1 destruction_finetune_siamese 64 cuda
 
-RUN_NAME="20251126-071224"
+RUN_NAME="20251126-075403"
 MODEL_NAME="${2:-destruction_finetune_siamese}"  # default if not provided
 BATCH_SIZE="${3:-64}"                            # default if not provided
 DEVICE="${4:-cuda}"                              # default: cuda (falls back to cpu if unavailable in py script)
@@ -23,4 +23,4 @@ python3 run_overview_vali_test.py \
   --model_name "$MODEL_NAME" \
   --batch_size "$BATCH_SIZE" \
   --device "$DEVICE" \
-  --cities hostomel irpin livoberezhnyi moschun rubizhne volnovakha # aleppo damascus daraa deirezzor hama homs idlib raqqa
+  --cities aleppo damascus daraa deirezzor hama homs idlib raqqa #hostomel irpin livoberezhnyi moschun rubizhne volnovakha
