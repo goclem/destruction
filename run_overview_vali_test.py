@@ -42,65 +42,58 @@ from destruction_utilities import paths  # assumes this defines paths.data and p
 # ---------------------------------------------------------------------
 
 class SiameseModel(nn.Module):
-    """
-    Same architecture as used in training:
-    - ViT encoder (facebook/vit-mae-base or a fine-tuned checkpoint)
-    - projection head
-    - MLP head over concatenated patch features
-    """
-
-    def __init__(self, backbone: str, head_hidden: int = 512):
+    def __init__(self, backbone: str, head_hidden=512):
         super().__init__()
         self.encoder = transformers.ViTModel.from_pretrained(backbone)
-        D = self.encoder.config.hidden_size
-        self.patch_dim = self.encoder.config.image_size // self.encoder.config.patch_size
+        D = self.encoder.config.hidden_size           # 768
+        self.patch_dim = self.encoder.config.image_size // self.encoder.config.patch_size  # 14
 
+        # shared projector
         d = D // 2
         self.proj = nn.Sequential(
             nn.Linear(D, d), nn.GELU(),
             nn.Linear(d, d)
         )
 
-        self.mlp_head = nn.Sequential(
-            nn.Linear(4 * d, head_hidden), nn.GELU(),
-            nn.LayerNorm(head_hidden),
-            nn.Linear(head_hidden, 1)
+        # classification head on concatenated pair features
+        #self.mlp_head = nn.Sequential(
+        #    nn.Linear(4*d, head_hidden), nn.GELU(),
+        #    nn.LayerNorm(head_hidden),
+        #    nn.Linear(head_hidden, 1)
+        #)
+
+        # classification head on concatenated pair features
+        self.mlp_head_simple = nn.Sequential(
+            nn.Linear(d, 128),
+            nn.GELU(),
+            nn.Dropout(0.2),     # <-- add this
+            nn.Linear(128, 1),
         )
+        
+    def _encode_tokens(self, x):  # x: [B, 3, 224, 224]
+        out = self.encoder(x).last_hidden_state  # [B, 1+196, 768]
+        return out[:, 1:, :]  # drop CLS -> [B, 196, 768]
 
-    def _encode_tokens(self, x: torch.Tensor) -> torch.Tensor:
-        # x: [B, 3, H, W]
-        out = self.encoder(x).last_hidden_state  # [B, 1+N_patches, D]
-        return out[:, 1:, :]                     # drop CLS token → [B, N_patches, D]
-
-    def forward(self, X: torch.Tensor):
-        """
-        X: [B, 2, 3, H, W]
-        Returns:
-            D  : [B, 1, P, P]  (per-patch distance)
-            Yh : [B, 1, P, P]  (per-patch logits)
-        """
-        x0, x1 = X[:, 0], X[:, 1]       # [B, 3, H, W]
-
-        H0 = self._encode_tokens(x0)    # [B, N_patches, D]
-        H1 = self._encode_tokens(x1)    # [B, N_patches, D]
-
-        H0 = self.proj(H0)              # [B, N_patches, d]
-        H1 = self.proj(H1)              # [B, N_patches, d]
+    def forward(self, X):  # X: [B, 2, 3, 224, 224]
+        x0, x1 = X[:, 0], X[:, 1]
+        H0 = self._encode_tokens(x0)            # [B,196,768]
+        H1 = self._encode_tokens(x1)            # [B,196,768]
+        H0 = self.proj(H0)                      # [B,196,d]
+        H1 = self.proj(H1)                      # [B,196,d]
 
         # distance for contrastive loss
-        D = (H0 - H1).norm(dim=-1)      # [B, N_patches]
+        D = (H0 - H1).norm(dim=-1)              # [B,196]
 
-        # build pair representation
-        Z = torch.cat(
-            [H0, H1, torch.abs(H0 - H1), H0 * H1],
-            dim=-1
-        )                               # [B, N_patches, 4d]
-        Yh = self.mlp_head(Z).squeeze(-1)  # [B, N_patches]
-
-        B = X.size(0)
-        P = self.patch_dim
-        D = D.view(B, 1, P, P)          # [B, 1, P, P]
-        Yh = Yh.view(B, 1, P, P)        # [B, 1, P, P]
+        # classification head
+        #Z  = torch.cat([H0, H1, torch.abs(H0 - H1), H0 * H1], dim=-1)  # [B,196,4d]
+        #Yh = self.mlp_head(Z).squeeze(-1)                               # [B,196]
+        diff = torch.abs(H0 - H1)    # [B,196,d]
+        Yh   = self.mlp_head_simple(diff).squeeze(-1)
+        
+        # reshape to grids
+        B = X.size(0); P = self.patch_dim
+        D  = D.view(B, 1, P, P)      # [B,1,14,14]
+        Yh = Yh.view(B, 1, P, P)     # [B,1,14,14]
         return D, Yh
 
 

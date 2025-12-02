@@ -890,11 +890,11 @@ class SiameseModel(nn.Module):
         )
 
         # classification head on concatenated pair features
-        self.mlp_head = nn.Sequential(
-            nn.Linear(4*d, head_hidden), nn.GELU(),
-            nn.LayerNorm(head_hidden),
-            nn.Linear(head_hidden, 1)
-        )
+        #self.mlp_head = nn.Sequential(
+        #    nn.Linear(4*d, head_hidden), nn.GELU(),
+        #    nn.LayerNorm(head_hidden),
+        #    nn.Linear(head_hidden, 1)
+        #)
 
         # classification head on concatenated pair features
         self.mlp_head_simple = nn.Sequential(
