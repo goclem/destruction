@@ -23,4 +23,4 @@ python3 run_overview_vali_test.py \
   --model_name "$MODEL_NAME" \
   --batch_size "$BATCH_SIZE" \
   --device "$DEVICE" \
-  --cities aleppo damascus daraa deirezzor hama homs idlib raqqa # hostomel irpin livoberezhnyi moschun rubizhne volnovakha #
+  --cities hostomel irpin livoberezhnyi moschun rubizhne volnovakha #aleppo damascus daraa deirezzor hama homs idlib raqqa #
