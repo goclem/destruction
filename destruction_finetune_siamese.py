@@ -900,7 +900,7 @@ class SiameseModel(nn.Module):
         self.mlp_head_simple = nn.Sequential(
             nn.Linear(d, 128),
             nn.GELU(),
-            nn.Dropout(0.2),     # <-- add this
+            nn.Dropout(0.2),     
             nn.Linear(128, 1),
         )
         
